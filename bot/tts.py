@@ -80,10 +80,17 @@ def _gemini_tts(cfg: dict, text: str, out: Path):
         raise RuntimeError("nenhum modelo TTS do Gemini disponível")
     model = cfg["ai"].get("gemini_tts_model") if cfg["ai"].get("gemini_tts_model") in names else sorted(names)[0]
     style = cfg["ai"].get("gemini_tts_style", "Energetic, confident gaming YouTuber, fast but clear, a little playful")
-    r = requests.post(f"{llm.GEMINI}/models/{model}:generateContent", params={"key": SECRETS.gemini},
-                      json={"contents": [{"parts": [{"text": f"{style}: {text}"}]}],
-                            "generationConfig": {"responseModalities": ["AUDIO"], "speechConfig": {"voiceConfig": {
-                                "prebuiltVoiceConfig": {"voiceName": cfg["ai"].get("gemini_tts_voice", "Puck")}}}}}, timeout=180)
+    import time
+    for attempt in range(4):
+        r = requests.post(f"{llm.GEMINI}/models/{model}:generateContent", params={"key": SECRETS.gemini},
+                          json={"contents": [{"parts": [{"text": f"{style}: {text}"}]}],
+                                "generationConfig": {"responseModalities": ["AUDIO"], "speechConfig": {"voiceConfig": {
+                                    "prebuiltVoiceConfig": {"voiceName": cfg["ai"].get("gemini_tts_voice", "Puck")}}}}}, timeout=180)
+        if r.status_code in (429, 503) and attempt < 3:
+            wait = 20 * (attempt + 1)
+            print(f"[tts gemini] limite de requisições; esperando {wait}s")
+            time.sleep(wait); continue
+        break
     r.raise_for_status()
     data = next(p["inlineData"] for p in r.json()["candidates"][0]["content"]["parts"] if "inlineData" in p)
     pcm = base64.b64decode(data["data"])  # PCM 16-bit 24 kHz mono
@@ -168,7 +175,9 @@ def narrate(cfg: dict, script: dict, workdir: Path) -> tuple[list[dict], bool]:
     for i, sc in enumerate(script["scenes"]):
         path = workdir / f"narration_{i:02d}.wav"
         words = None
-        for prov in ([prov_used] if prov_used else order):  # cadeia de fallback; fixa o 1º que funcionar
+        chain = order[order.index(prov_used):] if prov_used in order else order  # começa no que funcionou, mas pode descer
+        ok = False
+        for prov in chain:
             try:
                 if prov == "elevenlabs":
                     words = _elevenlabs_tts(cfg, sc["narration"], path)
@@ -186,10 +195,12 @@ def narrate(cfg: dict, script: dict, workdir: Path) -> tuple[list[dict], bool]:
                     _openai_tts(cfg, sc["narration"], path); words = _word_timestamps(path)
                 else:
                     _placeholder_audio(sc["narration"], path)
-                prov_used = prov
+                prov_used = prov; ok = True
                 break
             except Exception as e:
-                print(f"[aviso] TTS {prov} falhou: {str(e)[:120]}")
+                print(f"[aviso] TTS {prov} falhou na cena {i}: {str(e)[:120]}")
+        if not ok or not path.exists():
+            _placeholder_audio(sc["narration"], path); prov_used = "none"
         real = prov_used not in (None, "none")
         dur = _duration(path)
         words = words or _even_words(sc["narration"], dur)
