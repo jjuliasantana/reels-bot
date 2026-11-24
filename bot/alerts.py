@@ -20,3 +20,15 @@ def notify(cfg: dict, text: str):
             pass
     if not sent:
         print("[aviso — nenhum canal de alerta configurado]\n" + text)
+
+
+def send_video(cfg: dict, path: str, caption: str) -> bool:
+    """Envia o MP4 pelo Telegram (limite do Bot API: 50 MB). Retorna True se enviou."""
+    if not (SECRETS.telegram_token and SECRETS.telegram_chat):
+        return False
+    with open(path, "rb") as f:
+        r = requests.post(f"https://api.telegram.org/bot{SECRETS.telegram_token}/sendVideo",
+                          data={"chat_id": SECRETS.telegram_chat, "caption": caption[:1000], "supports_streaming": "true"},
+                          files={"video": f}, timeout=300)
+    r.raise_for_status()
+    return True

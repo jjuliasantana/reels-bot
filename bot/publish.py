@@ -5,7 +5,8 @@ import requests
 from .config import SECRETS
 from . import db
 
-GRAPH = "https://graph.facebook.com/v21.0"
+# "API com login do Instagram" (sem Página do Facebook): graph.instagram.com. Se usar token via Facebook Login, troque para graph.facebook.com.
+GRAPH = "https://graph.instagram.com/v22.0"
 
 
 # ---------- hospedagem (o Instagram só aceita video_url público) ----------
@@ -47,8 +48,17 @@ def host(cfg: dict, video: Path, post_key: str) -> str:
 
 
 # ---------- Instagram Graph API (conta profissional) ----------
+def ig_me() -> dict:
+    """Verifica o token e descobre o ID da conta profissional (GET /me)."""
+    r = requests.get(f"{GRAPH}/me", params={"fields": "user_id,username,account_type", "access_token": SECRETS.ig_token}, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 def ig_publish(con, post: dict, caption: str) -> str:
     tok, uid = SECRETS.ig_token, SECRETS.ig_user_id
+    if tok and not uid:
+        uid = ig_me().get("user_id")
     if not (tok and uid):
         raise RuntimeError("IG_ACCESS_TOKEN/IG_USER_ID ausentes")
     creation_id = post.get("ig_creation_id")
@@ -86,6 +96,27 @@ def buffer_publish(post: dict, caption: str) -> str:
     return str(r.json().get("updates", [{}])[0].get("id", ""))
 
 
+def platform_texts(script: dict, cfg: dict) -> str:
+    """Título/legenda prontos para colar no YouTube Shorts e no TikTok."""
+    tags = list(dict.fromkeys(script.get("hashtags", []) + cfg["publishing"]["hashtags"]))
+    yt_title = (script["title"][:90] + " #Shorts")
+    return (f"🎬 {script['title']}\n\n"
+            f"▶️ YouTube Shorts\nTítulo: {yt_title}\nDescrição:\n{script['caption']}\n{' '.join(tags)}\n\n"
+            f"🎵 TikTok\nLegenda: {script['caption'].splitlines()[0][:150]} {' '.join(tags[:5])}\n\n"
+            f"⚠️ Marque 'conteúdo alterado ou sintético' ao postar (narração e imagens geradas por IA).")
+
+
 def publish(cfg: dict, con, post: dict, caption: str) -> str:
     prov = cfg["publishing"]["provider"]
-    return ig_publish(con, post, caption) if prov == "instagram" else buffer_publish(post, caption)
+    if prov == "instagram":
+        return ig_publish(con, post, caption)
+    if prov == "buffer":
+        return buffer_publish(post, caption)
+    if prov == "telegram":  # entrega manual: o bot manda o MP4 + textos; você posta no YouTube/TikTok
+        from . import alerts
+        import json as _json
+        script = _json.loads(post["script_json"]) if isinstance(post.get("script_json"), str) else post["script_json"]
+        if not alerts.send_video(cfg, post["video_path"], platform_texts(script, cfg)):
+            raise RuntimeError("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID ausentes")
+        return f"telegram:{post['post_key']}"
+    raise RuntimeError(f"provider desconhecido: {prov}")

@@ -97,6 +97,10 @@ def cmd_run(cfg, con, dry_run: bool, sim: bool):
     trends = cluster.score_clusters(cfg, videos, prior)
     steps.append(("Agrupamento multilíngue e pontuação", True,
                   f"embeddings {cfg['ai']['embeddings']}" if (cfg["ai"]["embeddings"] == "gemini" and SECRETS.gemini) or (cfg["ai"]["embeddings"] == "openai" and SECRETS.openai) else "dicionário de aliases (sem embeddings)"))
+    if dry_run and not cfg["selection"]["allow_preliminary_post"]:
+        # Em teste (sem publicar) aceitamos sinal preliminar para sempre gerar um vídeo de amostra.
+        cfg["selection"]["allow_preliminary_post"] = True
+        steps.append(("Modo dry-run", True, "sinal preliminar aceito só para gerar amostra (na publicação real exige 2 coletas)"))
     trend, reason = cluster.pick(cfg, trends, db.recent_post_topics(con, cfg["selection"]["cooldown_days_same_topic"]))
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     post = {"post_key": f"{(trend or {}).get('slug', 'none')}-{today}", "topic_slug": (trend or {}).get("slug"),
@@ -156,19 +160,27 @@ def cmd_run(cfg, con, dry_run: bool, sim: bool):
             cost = estimate_cost(cfg, script, len(script["scenes"]), False)
 
         # --- publicação ---
+        prov = cfg["publishing"]["provider"]
         can_publish = cfg["publishing"]["enabled"] and SECRETS.publish_enabled_env and not dry_run and not simulated
+        if dry_run or not can_publish:  # em teste, manda o vídeo pelo Telegram (se configurado) para você avaliar/postar à mão
+            try:
+                if alerts.send_video(cfg, str(final), "🧪 Amostra (dry-run)\n" + publish.platform_texts(script, cfg)):
+                    steps.append(("Vídeo enviado no Telegram", True, "para avaliação / postagem manual"))
+            except Exception as e:
+                steps.append(("Vídeo enviado no Telegram", False, str(e)))
         if not can_publish:
             steps.append(("Publicação", False, "desligada (dry-run / aguardando autorização / dados simulados)"))
         elif db.posts_today(con) >= cfg["publishing"]["max_posts_per_day"]:
             steps.append(("Publicação", False, "limite diário de posts atingido"))
         else:
-            if not post.get("media_url"):
+            if prov != "telegram" and not post.get("media_url"):
                 post["media_url"] = publish.host(cfg, final, post["post_key"]); post["status"] = "hosted"; db.save_post(con, post)
             caption = script["caption"] + "\n\n" + " ".join(dict.fromkeys(script.get("hashtags", []) + cfg["publishing"]["hashtags"]))
             media_id = publish.publish(cfg, con, post, caption)
             post.update(status="published", ig_media_id=media_id, error=None); db.save_post(con, post)
             steps.append(("Publicação", True, f"media_id {media_id}"))
-            alerts.notify(cfg, f"✅ Reel publicado: {script['title']} ({post['post_key']}), custo estimado US$ {cost['total']:.3f}")
+            if prov != "telegram":
+                alerts.notify(cfg, f"✅ Reel publicado: {script['title']} ({post['post_key']}), custo estimado US$ {cost['total']:.3f}")
     except Exception as e:
         post.update(status="failed" if post.get("status") not in ("hosted", "creating") else post["status"], error=str(e)); db.save_post(con, post)
         steps.append(("Erro", False, str(e)))
@@ -179,12 +191,39 @@ def cmd_run(cfg, con, dry_run: bool, sim: bool):
     print(f"status: {post['status']}\nrelatório: {p}\nvídeo: {final if final.exists() else '-'}")
 
 
+def cmd_check(cfg):
+    """Diagnóstico das credenciais (relata em pt-BR; nunca publica)."""
+    import requests
+    def ok(name, fn):
+        try:
+            print(f"✅ {name}: {fn()}")
+        except Exception as e:
+            print(f"❌ {name}: {e}")
+    print("YOUTUBE_API_KEY:", "definida" if SECRETS.youtube else "ausente → dados simulados")
+    if SECRETS.youtube:
+        ok("YouTube", lambda: f"{len(youtube.search_recent('gta', 48, 3))} vídeos encontrados")
+    print("GEMINI_API_KEY:", "definida" if SECRETS.gemini else "ausente → roteiro-modelo")
+    if SECRETS.gemini:
+        from . import llm
+        ok("Gemini", lambda: llm.chat(cfg, "Reply with the single word OK.", "ping", 10).strip()[:20])
+    try:
+        import edge_tts  # noqa
+        print("✅ edge-tts instalado (narração gratuita)")
+    except ImportError:
+        print("❌ edge-tts não instalado → áudio placeholder (pip install edge-tts)")
+    print("IG_ACCESS_TOKEN:", "definido" if SECRETS.ig_token else "ausente → publicação impossível")
+    if SECRETS.ig_token:
+        ok("Instagram /me", lambda: publish.ig_me())
+    print("Publicação:", "LIGADA" if (cfg["publishing"]["enabled"] and SECRETS.publish_enabled_env) else "desligada")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("collect"); c.add_argument("--sim-hours", type=float, default=None)
     r = sub.add_parser("run"); r.add_argument("--dry-run", action="store_true"); r.add_argument("--sim", action="store_true")
     sub.add_parser("insights")
+    sub.add_parser("check")   # testa as credenciais configuradas, sem publicar nada
     a = ap.parse_args(argv)
     cfg, con = load_config(), db.connect()
     if a.cmd == "collect":
@@ -193,6 +232,8 @@ def main(argv=None):
         cmd_run(cfg, con, a.dry_run, a.sim)
     elif a.cmd == "insights":
         print(f"insights atualizados: {insights.fetch_and_store(con)}")
+    elif a.cmd == "check":
+        cmd_check(cfg)
 
 
 if __name__ == "__main__":

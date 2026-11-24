@@ -54,14 +54,17 @@ def available(cfg: dict) -> str | None:
     return None
 
 
-def chat(cfg: dict, system: str, user: str, max_tokens: int = 1500) -> str:
+def chat(cfg: dict, system: str, user: str, max_tokens: int = 1500, json_mode: bool = False) -> str:
     prov = available(cfg)
     if prov == "gemini":
+        gen = {"maxOutputTokens": max_tokens * 2, "temperature": 0.8}
+        if json_mode:
+            gen["responseMimeType"] = "application/json"
         r = requests.post(f"{GEMINI}/models/{gemini_model(cfg)}:generateContent",
                           params={"key": SECRETS.gemini},
                           json={"system_instruction": {"parts": [{"text": system}]},
                                 "contents": [{"role": "user", "parts": [{"text": user}]}],
-                                "generationConfig": {"maxOutputTokens": max_tokens * 2, "temperature": 0.8}}, timeout=120)
+                                "generationConfig": gen}, timeout=120)
         r.raise_for_status()
         return "".join(p.get("text", "") for p in r.json()["candidates"][0]["content"]["parts"])
     if prov == "anthropic":
@@ -82,7 +85,8 @@ def chat(cfg: dict, system: str, user: str, max_tokens: int = 1500) -> str:
 
 
 def chat_json(cfg: dict, system: str, user: str, max_tokens: int = 1500) -> dict:
-    txt = chat(cfg, system + "\nResponda SOMENTE com JSON válido, sem markdown.", user, max_tokens)
+    txt = chat(cfg, system + "\nRespond ONLY with valid JSON, no markdown fences.", user, max_tokens, json_mode=True)
+    txt = re.sub(r"^```(?:json)?\s*|\s*```$", "", txt.strip())
     m = re.search(r"\{.*\}", txt, re.S)
     return json.loads(m.group(0) if m else txt)
 
