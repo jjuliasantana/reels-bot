@@ -5,7 +5,7 @@ import wave
 from pathlib import Path
 import numpy as np
 import requests
-from .config import SECRETS
+from .config import SECRETS, env
 
 WORDS_PER_SEC = 2.3  # ritmo de fala estimado quando não há áudio real (inclui pausas)
 
@@ -91,6 +91,38 @@ def _gemini_tts(cfg: dict, text: str, out: Path):
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000); w.writeframes(pcm)
 
 
+def _elevenlabs_tts(cfg: dict, text: str, out: Path) -> list[dict]:
+    """ElevenLabs (plano grátis: ~10k créditos/mês, não comercial; Starter US$5 para monetizar). Com timestamps."""
+    import base64
+    key = env("ELEVENLABS_API_KEY")
+    if not key:
+        raise RuntimeError("sem ELEVENLABS_API_KEY")
+    voice = cfg["ai"].get("elevenlabs_voice_id", "pNInz6obpgDQGcFmaJgB")  # Adam (padrão da ElevenLabs)
+    r = requests.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}/with-timestamps",
+                      headers={"xi-api-key": key, "Content-Type": "application/json"},
+                      params={"output_format": "mp3_44100_128"},
+                      json={"text": text, "model_id": cfg["ai"].get("elevenlabs_model", "eleven_multilingual_v2"),
+                            "voice_settings": {"stability": 0.4, "similarity_boost": 0.8, "style": 0.35}}, timeout=180)
+    r.raise_for_status()
+    j = r.json()
+    mp3 = out.with_suffix(".mp3"); mp3.write_bytes(base64.b64decode(j["audio_base64"]))
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(mp3), "-ar", "44100", "-ac", "1", str(out)], check=True)
+    al = j.get("alignment") or {}
+    chars, starts, ends = al.get("characters", []), al.get("character_start_times_seconds", []), al.get("character_end_times_seconds", [])
+    words, cur, ws = [], "", None
+    for c, st, en in zip(chars, starts, ends):
+        if c.isspace():
+            if cur:
+                words.append({"word": cur, "start": ws, "end": en}); cur, ws = "", None
+        else:
+            if ws is None:
+                ws = st
+            cur += c; last = en
+    if cur:
+        words.append({"word": cur, "start": ws, "end": last})
+    return words
+
+
 def _word_timestamps(path: Path) -> list[dict] | None:
     """Whisper com timestamps por palavra (opcional, melhora a sincronia das legendas)."""
     try:
@@ -138,7 +170,9 @@ def narrate(cfg: dict, script: dict, workdir: Path) -> tuple[list[dict], bool]:
         words = None
         for prov in ([prov_used] if prov_used else order):  # cadeia de fallback; fixa o 1º que funcionar
             try:
-                if prov == "kokoro":
+                if prov == "elevenlabs":
+                    words = _elevenlabs_tts(cfg, sc["narration"], path)
+                elif prov == "kokoro":
                     words = _kokoro_tts(cfg, sc["narration"], path)
                 elif prov == "gemini":
                     if not SECRETS.gemini:

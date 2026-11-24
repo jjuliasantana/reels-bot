@@ -24,11 +24,13 @@ Rules:
 - For each scene write an image_prompt: a vivid, original illustration idea in a stylized painterly/concept-art
   look, vertical composition, moody lighting, NO text, NO logos, NO real characters or trademarked designs, and
   described generically (e.g. "neon-lit coastal city at night from above", not "Vice City").
+- Each scene also gets a stock_query: 2–4 English words to find real stock footage for the mood (e.g. "night city drone",
+  "desert highway", "neon rain street", "ocean coast aerial"). Generic, no game names.
 - Each scene also gets a 3–6 word on-screen headline (ALL CAPS) and a fallback template from:
   title_card, map, cityscape, stat_bars, grid_abstract, orbit.
 Return JSON:
 {"angle": "...", "title": "...", "rumor_flags": ["..."], "claims": [{"claim": "...", "status": "confirmed|rumor", "source_hint": "..."}],
- "scenes": [{"narration": "...", "headline": "...", "image_prompt": "...", "template": "map", "params": {"accent": "#hex"}}],
+ "scenes": [{"narration": "...", "headline": "...", "image_prompt": "...", "stock_query": "...", "template": "map", "params": {"accent": "#hex"}}],
  "caption": "<Instagram/TikTok caption, 2-3 lines + CTA>", "hashtags": ["#..."]}"""
 
 
@@ -51,10 +53,10 @@ def _fallback_script(trend: dict) -> dict:
                  "image_prompt": "lonely desert road at golden hour with a mysterious glowing structure in the distance, concept art", "params": {"accent": "#58a6ff"}},
                 {"narration": "Three. Water and mountains are cheap. Dense city blocks are expensive. That's why big maps are mostly wilderness.", "headline": "WILDERNESS IS CHEAP", "template": "cityscape",
                  "image_prompt": "dense neon city skyline bordered by dark mountains and ocean, moody painterly style, vertical", "params": {"accent": "#ffd166"}},
-                {"narration": "And any exact size number you've seen online? Still a rumor until the studio confirms it. Follow for more.", "headline": "RUMOR UNTIL CONFIRMED", "template": "stat_bars",
+                {"narration": "And any exact size number you've seen online? Still a rumor until the studio confirms it. Follow Beyond the HUD for more.", "headline": "RUMOR UNTIL CONFIRMED", "template": "stat_bars",
                  "image_prompt": "abstract glowing question mark over a dark map grid, cinematic lighting", "params": {"accent": "#ff5f3c"}},
             ],
-            "caption": f"3 things about {game}'s map you probably never noticed. Size numbers are rumors until confirmed.\nFollow for daily gaming curiosities.",
+            "caption": f"3 things about {game}'s map you probably never noticed. Size numbers are rumors until confirmed.\nFollow @beyondthehudtv for daily gaming curiosities.",
             "hashtags": ["#gaming", "#openworld", "#gamedesign", "#didyouknow"],
         }
     return {
@@ -66,9 +68,9 @@ def _fallback_script(trend: dict) -> dict:
             {"narration": f"{game} is suddenly everywhere. Here's the part nobody explains.", "headline": "EVERYWHERE RIGHT NOW", "template": "title_card", "params": {"accent": "#ff5f3c"}},
             {"narration": "Big moments in games spread across languages before they spread across channels. That's the tell.", "headline": "SPREADS ACROSS LANGUAGES", "template": "orbit", "params": {"accent": "#2ee6a6"}},
             {"narration": "When a topic grows on independent channels at the same time, it's real momentum, not one creator's push.", "headline": "REAL MOMENTUM", "template": "stat_bars", "params": {"accent": "#58a6ff"}},
-            {"narration": "Anything not confirmed by the studio is still a rumor. Follow for the next one.", "headline": "RUMOR UNTIL CONFIRMED", "template": "grid_abstract", "params": {"accent": "#ffd166"}},
+            {"narration": "Anything not confirmed by the studio is still a rumor. Follow Beyond the HUD for the next one.", "headline": "RUMOR UNTIL CONFIRMED", "template": "grid_abstract", "params": {"accent": "#ffd166"}},
         ],
-        "caption": f"The real reason {game} is everywhere right now.\nFollow for daily game breakdowns.",
+        "caption": f"The real reason {game} is everywhere right now.\nFollow @beyondthehudtv for daily game breakdowns.",
         "hashtags": ["#gaming", "#gamenews"],
     }
 
@@ -85,8 +87,9 @@ def write_script(cfg: dict, trend: dict) -> tuple[dict, bool]:
                    "languages": trend["languages"]},
         "titles_seen_for_context_only": [e["title"] for e in trend["evidence"][:8]],
     }, ensure_ascii=False)
+    system = SYSTEM.replace("{channel}", cfg["channel"]["name"]).replace("{handle}", cfg["channel"].get("handle", ""))
     try:
-        s = llm.chat_json(cfg, SYSTEM, user, max_tokens=1800)
+        s = llm.chat_json(cfg, system, user, max_tokens=1800)
         assert s.get("scenes") and s.get("caption") and s.get("angle")
     except Exception as e:
         print(f"[aviso] roteiro por LLM falhou ({e}); usando roteiro-modelo")

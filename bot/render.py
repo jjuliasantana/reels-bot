@@ -5,16 +5,13 @@ import random
 import subprocess
 from pathlib import Path
 from PIL import Image
-from . import visuals
+from . import visuals, assets
 from .config import ROOT
 
 
 def find_broll(game: str | None) -> list[Path]:
-    """Clipes de gameplay gravados POR VOCÊ em assets/broll/<jogo>/ (mp4/mov). Nunca baixamos de terceiros."""
-    if not game:
-        return []
-    d = ROOT / "assets" / "broll" / game
-    return sorted(p for p in d.glob("*") if p.suffix.lower() in (".mp4", ".mov", ".mkv")) if d.exists() else []
+    """Material em assets/broll/<jogo>/: sua gameplay ou material oficial do publisher (vídeo ou imagem)."""
+    return assets.local_assets(game)
 
 ENC = ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", "30"]
 
@@ -60,6 +57,22 @@ def _run(cmd: list[str]):
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
+def _label_for(cfg: dict, path: Path) -> str:
+    return cfg["video"]["official_label"] if path.name.startswith("official_") else cfg["video"]["broll_label"]
+
+
+def _mix_broll(broll: list[Path], n_scenes: int) -> list[Path]:
+    """Alterna vídeo e imagens para não ficar só foto parada."""
+    vids = [p for p in broll if p.suffix.lower() in assets.VIDEO_EXT]
+    imgs = [p for p in broll if p.suffix.lower() in assets.IMAGE_EXT]
+    if not vids or not imgs:
+        return broll
+    out = []
+    for i in range(max(n_scenes, len(broll))):
+        out.append(vids[i % len(vids)] if i % 2 == 0 else imgs[(i // 2) % len(imgs)])
+    return out
+
+
 def _overlay_png(cfg: dict, scene: dict, idx: int, workdir: Path) -> Path:
     """Só headline + selo, fundo transparente, para sobrepor ao B-roll."""
     from PIL import ImageDraw
@@ -69,7 +82,7 @@ def _overlay_png(cfg: dict, scene: dict, idx: int, workdir: Path) -> Path:
     img = Image.alpha_composite(img, shade)
     rgb = img.convert("RGB")
     visuals._headline(rgb, cfg, scene["headline"], visuals._hex(scene.get("params", {}).get("accent", "#2ee6a6")))
-    visuals._label(rgb, cfg, cfg["video"]["broll_label"])
+    visuals._label(rgb, cfg, scene.get("label") or cfg["video"]["broll_label"])
     # recupera alpha: onde o rgb mudou vs. preto puro
     import numpy as np
     a = np.array(rgb); alpha = np.array(img)[:, :, 3]
@@ -86,19 +99,39 @@ def render_scene(cfg: dict, scene: dict, idx: int, workdir: Path, broll: list[Pa
     frames = max(int(round(scene["duration"] * fps)), fps)
     dur = frames / fps
     ass_path = str(ass).replace("\\", "/").replace(":", "\\:")
+    clip = None
     if broll:
         clip = broll[idx % len(broll)]
+        scene["label"] = _label_for(cfg, clip)
+    elif cfg["video"].get("use_pexels", True):
+        q = scene.get("stock_query") or " ".join((scene.get("image_prompt") or scene["headline"]).split()[:5])
+        clip = assets.pexels_clip(q, workdir, idx)
+        if clip:
+            scene["label"] = cfg["video"]["stock_label"]
+    if clip and clip.suffix.lower() in assets.IMAGE_EXT:
+        # imagem oficial (screenshot): Ken Burns sobre a imagem, mesma rota das ilustrações
+        img = visuals._cover(Image.open(clip).convert("RGB"))
+        png = workdir / f"scene_{idx:02d}.png"
+        visuals._headline(img, cfg, scene["headline"], visuals._hex(scene.get("params", {}).get("accent", "#2ee6a6")))
+        visuals._label(img, cfg, scene["label"])
+        img.save(png)
+        scene["broll"] = True
+        clip = None
+        used_ai = False
+    elif clip:
         scene["broll"] = True
         ov = _overlay_png(cfg, scene, idx, workdir)
+        start = random.Random(f"{clip}{idx}").uniform(0, 20)  # trecho diferente a cada cena
         vf = (f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps={fps},"
               f"eq=contrast=1.05:saturation=1.1[bg];[bg][1:v]overlay=0:0[o];[o]subtitles='{ass_path}',"
               f"fade=t=in:d=0.25,fade=t=out:st={max(dur - 0.25, 0):.2f}:d=0.25,format=yuv420p[v]")
         tmp, out = workdir / f"scene_{idx:02d}.tmp.mp4", workdir / f"scene_{idx:02d}.mp4"
-        _run(["ffmpeg", "-y", "-loglevel", "error", "-stream_loop", "-1", "-i", str(clip), "-i", str(ov),
+        _run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{start:.2f}", "-stream_loop", "-1", "-i", str(clip), "-i", str(ov),
               "-filter_complex", vf, "-map", "[v]", "-t", f"{dur:.3f}", *ENC, "-an", str(tmp)])
         os.replace(tmp, out)
         return out, False
-    png, used_ai = visuals.render_scene_image(cfg, scene, idx, workdir)
+    if not scene.get("broll"):
+        png, used_ai = visuals.render_scene_image(cfg, scene, idx, workdir)
     # alterna zoom-in e pan lateral (movimento simples e barato)
     punch = "1.22-0.12*min(on/6,1)"  # entra com zoom forte e relaxa em 6 frames (corte com impacto)
     if idx % 2 == 0:
@@ -113,12 +146,20 @@ def render_scene(cfg: dict, scene: dict, idx: int, workdir: Path, broll: list[Pa
     return out, used_ai
 
 
-def assemble(cfg: dict, scenes: list[dict], workdir: Path, final_path: Path, game: str | None = None) -> dict:
+def assemble(cfg: dict, scenes: list[dict], workdir: Path, final_path: Path, game: str | None = None,
+             game_name: str | None = None) -> dict:
     files, ai_images = [], 0
+    assets.sync_sources(cfg)
     broll = find_broll(game) if cfg["video"].get("use_own_broll", True) else []
+    credit = None
+    if not broll and cfg["video"].get("use_steam_official", True):
+        broll, credit = assets.steam_official(game_name or (game or "").replace("-", " "), workdir)
+        if broll:
+            cfg["video"]["official_label"] = credit
     if broll:
         random.Random(final_path.name).shuffle(broll)
-        print(f"[broll] usando {len(broll)} clipes próprios de assets/broll/{game}")
+        broll = _mix_broll(broll, len(scenes))
+        print(f"[broll] usando {len(broll)} arquivos de fundo para {game}")
     for i, sc in enumerate(scenes):
         f, used_ai = render_scene(cfg, sc, i, workdir, broll)
         files.append(f); ai_images += int(used_ai)

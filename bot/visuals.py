@@ -82,7 +82,7 @@ def _label(img, cfg, text):
     d = ImageDraw.Draw(img)
     f = find_font(cfg, 30)
     tw = d.textlength(text, font=f)
-    d.rounded_rectangle([(W - tw) / 2 - 24, 200, (W + tw) / 2 + 24, 256], radius=14, fill=(0, 0, 0))
+    d.rounded_rectangle([(W - tw) / 2 - 24, 200, (W + tw) / 2 + 24, 256], radius=14, fill=(16, 16, 20))
     d.text(((W - tw) / 2, 208), text, font=f, fill=(230, 230, 230))
 
 

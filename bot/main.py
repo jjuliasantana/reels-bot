@@ -148,7 +148,7 @@ def cmd_run(cfg, con, dry_run: bool, sim: bool):
                 target = int(writer.word_count(script) * (vmax - 3) / total) if total > vmax else int(writer.word_count(script) * (vmin + 3) / total)
                 script, _ = writer.write_script(cfg, {**trend, "label": trend["label"] + f" (rewrite: exactly ~{target} words total)"})
                 scenes, real_tts = tts.narrate(cfg, script, workdir); total = sum(s["duration"] for s in scenes)
-            video_info = render.assemble(cfg, scenes, workdir, final, trend.get("game"))
+            video_info = render.assemble(cfg, scenes, workdir, final, trend.get("game"), trend.get("game_name"))
             steps.append(("Render MP4 9:16 (ilustrações + legendas)", True,
                           f"{video_info['seconds']} s" + (" ⚠️ fora da faixa 30–45 s" if not vmin <= video_info["seconds"] <= vmax else "")))
             cost = estimate_cost(cfg, script, len(scenes), cfg["video"]["image_generation"] == "openai" and bool(SECRETS.openai))

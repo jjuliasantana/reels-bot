@@ -124,7 +124,7 @@ def _label_with_llm(cfg: dict, groups: dict[str, list[dict]]) -> dict[str, dict]
 def _llm_labels(cfg, payload):
     return llm.chat_json(cfg,
         "You label clusters of YouTube gaming video titles (any language). For each cluster id, return "
-        '{"<id>": {"label": "<short English topic, e.g. GTA 6 map size>", "game": "<game slug>", "subtopic": "<slug>", '
+        '{"<id>": {"label": "<short English topic, e.g. GTA 6 map size>", "game": "<game slug>", "game_name": "<official game title, e.g. Grand Theft Auto VI>", "subtopic": "<slug>", '
         '"english_fit": <0..1 how relevant to a US gaming audience>}}',
         str(payload), max_tokens=2000)
 
@@ -172,6 +172,7 @@ def score_clusters(cfg: dict, videos: list[dict], insights_prior: dict | None = 
         total_views = sum(sorted(v["snapshots"], key=lambda s: s["taken_at"])[-1]["views"] for v in vs)
         trends.append({
             "key": key, "slug": slug, "label": lab["label"], "game": lab.get("game"), "subtopic": lab.get("subtopic"),
+            "game_name": lab.get("game_name") or (lab.get("game") or "").replace("-", " "),
             "score": round(score, 3), "views_per_hour": round(vph), "preliminary": preliminary,
             "independent_channels": len(channels), "languages": sorted(langs), "total_views": total_views,
             "english_fit": english_fit, "insights_bonus": bonus,
