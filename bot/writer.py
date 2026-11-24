@@ -117,7 +117,10 @@ def write_script(cfg: dict, trend: dict) -> tuple[dict, bool]:
         s, last_err = None, None
         for attempt in range(3):  # até 3 tentativas; a partir da 2ª manda os problemas encontrados
             extra = "" if not last_err else f"\n\nYour previous draft was rejected because: {last_err}. Fix ALL of it."
-            cand = llm.chat_json(cfg, system, user + extra, max_tokens=2500)
+            try:
+                cand = llm.chat_json(cfg, system, user + extra, max_tokens=2500)
+            except Exception as e:  # JSON quebrado, 429 etc.: conta como tentativa
+                last_err = f"invalid JSON ({str(e)[:60]})"; print(f"[roteiro] tentativa {attempt + 1} falhou: {e}"); continue
             if not (cand.get("scenes") and cand.get("caption") and cand.get("angle")):
                 last_err = "JSON incompleto"; continue
             issues = _quality_issues(cand, trend)

@@ -94,11 +94,63 @@ def chat(cfg: dict, system: str, user: str, max_tokens: int = 1500, json_mode: b
     raise RuntimeError("Nenhum LLM configurado")
 
 
-def chat_json(cfg: dict, system: str, user: str, max_tokens: int = 1500) -> dict:
-    txt = chat(cfg, system + "\nRespond ONLY with valid JSON, no markdown fences.", user, max_tokens, json_mode=True)
+def _clean(txt: str) -> str:
     txt = re.sub(r"^```(?:json)?\s*|\s*```$", "", txt.strip())
     m = re.search(r"\{.*\}", txt, re.S)
-    return json.loads(m.group(0) if m else txt)
+    return m.group(0) if m else txt
+
+
+def _repair_json(txt: str) -> str:
+    """Conserta erros comuns de LLM: aspas curvas, quebras de linha dentro de strings, aspas internas sem escape."""
+    txt = txt.replace("\u201c", '\\"').replace("\u201d", '\\"').replace("\u2019", "'").replace("\u2018", "'")
+    out, in_str, esc = [], False, False
+    i = 0
+    while i < len(txt):
+        c = txt[i]
+        if in_str:
+            if esc:
+                out.append(c); esc = False
+            elif c == "\\":
+                out.append(c); esc = True
+            elif c == '"':
+                # fecha a string só se o próximo caractere relevante for um delimitador JSON; senão é aspa interna
+                j = i + 1
+                while j < len(txt) and txt[j] in " \t\r\n":
+                    j += 1
+                if j >= len(txt) or txt[j] in ",}]:":
+                    out.append(c); in_str = False
+                else:
+                    out.append('\\"')
+            elif c == "\n":
+                out.append("\\n")
+            else:
+                out.append(c)
+        else:
+            if c == '"':
+                in_str = True
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def parse_json_lenient(txt: str) -> dict:
+    txt = _clean(txt)
+    try:
+        return json.loads(txt)
+    except json.JSONDecodeError:
+        return json.loads(_repair_json(txt))
+
+
+def chat_json(cfg: dict, system: str, user: str, max_tokens: int = 1500) -> dict:
+    txt = chat(cfg, system + "\nRespond ONLY with valid JSON, no markdown fences. Escape double quotes inside strings "
+               "(or use single quotes inside text).", user, max_tokens, json_mode=True)
+    try:
+        return parse_json_lenient(txt)
+    except json.JSONDecodeError as e:
+        print(f"[json] inválido ({e}); pedindo correção ao modelo")
+        fixed = chat(cfg, "You fix broken JSON. Output ONLY the corrected JSON, same content, nothing else.",
+                     _clean(txt)[:12000], max_tokens, json_mode=True)
+        return parse_json_lenient(fixed)
 
 
 def embeddings(texts: list[str], provider: str = "gemini", cfg: dict | None = None) -> list[list[float]] | None:
