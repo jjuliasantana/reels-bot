@@ -11,11 +11,11 @@ on:
         default: "dry-run"
 
 permissions:
-  contents: write
+  contents: write            # commit do estado + releases para hospedar o MP4
 
 concurrency:
   group: reels-bot
-  cancel-in-progress: false
+  cancel-in-progress: false  # nunca interromper uma publicação no meio (anti-duplicata)
 
 jobs:
   bot:
@@ -32,15 +32,21 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       ALERT_WEBHOOK_URL: ${{ secrets.ALERT_WEBHOOK_URL }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      PUBLISH_ENABLED: ${{ vars.PUBLISH_ENABLED }}
+      PUBLISH_ENABLED: ${{ vars.PUBLISH_ENABLED }}   # variável do repositório: "true" só depois da sua autorização
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - name: Dependências
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-inter fonts-dejavu-core
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-inter fonts-dejavu-core espeak-ng libsndfile1
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
+      - name: Cache do modelo de voz (Kokoro)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: kokoro-hf-v1
       - name: Decidir modo
         id: mode
         run: |
