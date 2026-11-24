@@ -69,8 +69,8 @@ def _fallback_clusters(videos: list[dict]) -> dict[str, list[dict]]:
     return groups
 
 
-def _embedding_clusters(videos: list[dict], provider: str, threshold: float = 0.72) -> dict[str, list[dict]] | None:
-    vecs = llm.embeddings([v["title"] for v in videos], provider)
+def _embedding_clusters(videos: list[dict], provider: str, cfg: dict, threshold: float = 0.72) -> dict[str, list[dict]] | None:
+    vecs = llm.embeddings([v["title"] for v in videos], provider, cfg)
     if vecs is None:
         return None
     X = np.array(vecs)
@@ -104,14 +104,29 @@ def _label_with_llm(cfg: dict, groups: dict[str, list[dict]]) -> dict[str, dict]
             labels[k] = {"label": f"{game.upper() if len(game) <= 3 else game.replace('-', ' ').title()} — {sub}", "game": game, "subtopic": sub}
         return labels
     payload = {k: [v["title"] for v in vs[:6]] for k, vs in groups.items()}
-    out = llm.chat_json(cfg,
+    try:
+        out = _llm_labels(cfg, payload)
+    except Exception as e:  # LLM fora do ar / modelo inexistente → não derruba a execução
+        print(f"[aviso] rotulagem por LLM falhou ({e}); usando rótulos por dicionário")
+        out = {}
+    for k in groups:
+        lab = out.get(k)
+        if not lab:
+            if k.startswith("emb-"):  # cluster por embeddings sem rótulo do LLM → detecta pelo título mais visto
+                t0 = groups[k][0]["title"]
+                k = f"{_detect(t0, GAME_ALIASES) or 'unknown'}:{_detect(t0, SUBTOPIC_ALIASES) or 'general'}"
+            game, _, sub = k.partition(":")
+            lab = {"label": f"{game.upper() if len(game) <= 3 else game.replace('-', ' ').title()} — {sub}", "game": game, "subtopic": sub}
+        labels[k] = lab
+    return labels
+
+
+def _llm_labels(cfg, payload):
+    return llm.chat_json(cfg,
         "You label clusters of YouTube gaming video titles (any language). For each cluster id, return "
         '{"<id>": {"label": "<short English topic, e.g. GTA 6 map size>", "game": "<game slug>", "subtopic": "<slug>", '
         '"english_fit": <0..1 how relevant to a US gaming audience>}}',
         str(payload), max_tokens=2000)
-    for k in groups:
-        labels[k] = out.get(k) or {"label": k, "game": "unknown", "subtopic": "general"}
-    return labels
 
 
 def _hours_between(a: str, b: str) -> float:
@@ -125,7 +140,7 @@ def score_clusters(cfg: dict, videos: list[dict], insights_prior: dict | None = 
     groups = None
     if cfg["ai"]["embeddings"] in ("gemini", "openai"):
         try:
-            groups = _embedding_clusters(videos, cfg["ai"]["embeddings"])
+            groups = _embedding_clusters(videos, cfg["ai"]["embeddings"], cfg)
         except Exception:
             groups = None
     if groups is None:

@@ -69,7 +69,13 @@ def write_script(cfg: dict, trend: dict) -> tuple[dict, bool]:
                    "languages": trend["languages"]},
         "titles_seen_for_context_only": [e["title"] for e in trend["evidence"][:8]],
     }, ensure_ascii=False)
-    s = llm.chat_json(cfg, SYSTEM, user, max_tokens=1800)
+    try:
+        s = llm.chat_json(cfg, SYSTEM, user, max_tokens=1800)
+        assert s.get("scenes") and s.get("caption") and s.get("angle")
+    except Exception as e:
+        print(f"[aviso] roteiro por LLM falhou ({e}); usando roteiro-modelo")
+        s = _fallback_script(trend); s["generated_by"] = f"fallback-template (LLM falhou: {str(e)[:80]})"
+        return s, False
     for sc in s["scenes"]:
         if sc.get("template") not in VISUAL_TEMPLATES:
             sc["template"] = "grid_abstract"
