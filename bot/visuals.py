@@ -204,13 +204,57 @@ def _openai_background(prompt: str) -> Image.Image | None:
         return None
 
 
+def _gemini_background(cfg: dict, prompt: str) -> Image.Image | None:
+    """Imagem pelo modelo de imagem do Gemini (cota gratuita). Nome do modelo detectado via models.list."""
+    try:
+        import io
+        from . import llm
+        r = requests.get(f"{llm.GEMINI}/models", params={"key": SECRETS.gemini, "pageSize": 1000}, timeout=30)
+        r.raise_for_status()
+        names = [m["name"].removeprefix("models/") for m in r.json().get("models", [])
+                 if "generateContent" in m.get("supportedGenerationMethods", []) and "image" in m["name"]
+                 and "preview" not in m["name"]]
+        names = names or [m["name"].removeprefix("models/") for m in r.json().get("models", []) if "image" in m["name"]]
+        if not names:
+            return None
+        model = cfg["video"].get("gemini_image_model") if cfg["video"].get("gemini_image_model") in names else sorted(names, reverse=True)[0]
+        r = requests.post(f"{llm.GEMINI}/models/{model}:generateContent", params={"key": SECRETS.gemini},
+                          json={"contents": [{"parts": [{"text": prompt}]}],
+                                "generationConfig": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": "9:16"}}},
+                          timeout=180)
+        r.raise_for_status()
+        for part in r.json()["candidates"][0]["content"]["parts"]:
+            if "inlineData" in part:
+                img = Image.open(io.BytesIO(base64.b64decode(part["inlineData"]["data"]))).convert("RGB")
+                return _cover(img)
+    except Exception as e:
+        print(f"[aviso] imagem Gemini falhou: {e}")
+    return None
+
+
+def _cover(img: Image.Image) -> Image.Image:
+    """Redimensiona cobrindo 1080x1920 sem distorcer (corte central)."""
+    s = max(W / img.width, H / img.height)
+    img = img.resize((round(img.width * s), round(img.height * s)), Image.LANCZOS)
+    x, y = (img.width - W) // 2, (img.height - H) // 2
+    return img.crop((x, y, x + W, y + H))
+
+
 def render_scene_image(cfg: dict, scene: dict, idx: int, workdir: Path) -> tuple[Path, bool]:
     """Retorna (png, usou_imagem_IA?)."""
     rng = np.random.default_rng(1000 + idx)
     accent = _hex(scene.get("params", {}).get("accent", "#2ee6a6"))
     used_ai = False
     img = None
-    if cfg["video"]["image_generation"] == "openai" and SECRETS.openai:
+    prompt = scene.get("image_prompt") or f"theme: {scene['headline']}"
+    style = (" Original stylized painterly concept-art illustration for a gaming short, vertical 9:16, moody cinematic "
+             "lighting, rich colors. No text, no letters, no logos, no watermarks, no real game characters, vehicles or "
+             "trademarked designs.")
+    max_ai = int(cfg["video"].get("max_ai_images_per_video", 3))
+    if cfg["video"]["image_generation"] == "gemini" and SECRETS.gemini and idx < max_ai:
+        img = _gemini_background(cfg, prompt + style)
+        used_ai = img is not None
+    if img is None and cfg["video"]["image_generation"] == "openai" and SECRETS.openai:
         img = _openai_background(
             f"Original stylized flat illustration for a gaming explainer, vertical, moody dark palette with accent "
             f"color {scene.get('params', {}).get('accent')}, theme: {scene['headline']}. No text, no logos, no real "
@@ -226,7 +270,7 @@ def render_scene_image(cfg: dict, scene: dict, idx: int, workdir: Path) -> tuple
     fade = np.clip(1.15 - 0.55 * np.exp(-((yy - 0.17) ** 2) / 0.01) - 0.6 * np.exp(-((yy - 0.86) ** 2) / 0.006), 0.35, 1.0)
     img = Image.fromarray((arr * fade[:, :, None]).astype(np.uint8))
     _headline(img, cfg, scene["headline"], accent)
-    _label(img, cfg, cfg["video"]["illustration_label"])
+    _label(img, cfg, cfg["video"]["illustration_label"] if not scene.get("broll") else cfg["video"]["broll_label"])
     out = workdir / f"scene_{idx:02d}.png"
     img.save(out)
     return out, used_ai

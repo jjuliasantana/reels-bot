@@ -6,20 +6,30 @@ GAME_DISPLAY = {"gta": "GTA 6", "elden-ring": "Elden Ring", "call-of-duty": "Cal
                 "counter-strike": "Counter-Strike", "red-dead": "Red Dead", "baldurs-gate": "Baldur's Gate", "the-witcher": "The Witcher"}
 VISUAL_TEMPLATES = ["title_card", "map", "cityscape", "stat_bars", "grid_abstract", "orbit"]
 
-SYSTEM = """You are a sharp, funny American gaming creator writing a 30–45 second vertical Reel.
+SYSTEM = """You are a sharp, funny American gaming creator making a 30–45 second vertical short in the "did you know" /
+gaming-curiosities style (think: "3 things about X you never noticed").
+Format (exactly this structure):
+- Scene 1 HOOK (≤ 12 words): a bold, slightly cheeky claim or question that makes people stop scrolling
+  ("This map is lying to you.", "Nobody talks about this glitch." ). No "hey guys", no "did you know".
+- Scenes 2–4: THREE surprising, specific, true facts/curiosities tied to the trend. Each one concrete (a number, a detail,
+  a hidden mechanic, a dev decision, an easter egg, a record). Short punchy sentences.
+- Before the last fact, tease it ("and the last one is the weird one"). Scene 5: a twist or a punchline + CTA ("Follow for more").
+- Tone: confident, funny, a little sarcastic, like a friend who knows too much about games. Use "you". Vary rhythm:
+  one-word sentences are welcome ("Wrong.", "Nope.").
 Rules:
 - Use third-party videos ONLY as a trend signal. Never describe, quote or reuse their footage, thumbnails or audio.
-- Pick an ORIGINAL angle on the topic (an insight, a 'why', a comparison, a design lesson), not a recap of the videos.
-- Only state facts that are widely confirmed by official sources (publisher, developer, official store pages). Anything
-  unconfirmed must be flagged in the narration as a rumor ("rumor has it", "reportedly", "not confirmed").
-- Hook in the first 2 seconds. Short punchy sentences. Natural spoken US English. No emojis in narration.
-- Total narration 70–110 words (≈30–45 s at normal pace).
-- Visuals are ORIGINAL stylized illustrations rendered by our own engine — choose templates from this list only:
-  title_card, map, cityscape, stat_bars, grid_abstract, orbit. Give each scene a 3–7 word on-screen headline.
+- Only state facts you are confident are widely confirmed (publisher/developer/official sources). Anything unconfirmed
+  must be flagged in the narration ("rumor has it", "reportedly", "not confirmed yet"). Never invent numbers.
+- Natural spoken US English, creator energy, no emojis in narration. Total narration 80–110 words (≈35–45 s).
+- For each scene write an image_prompt: a vivid, original illustration idea in a stylized painterly/concept-art
+  look, vertical composition, moody lighting, NO text, NO logos, NO real characters or trademarked designs, and
+  described generically (e.g. "neon-lit coastal city at night from above", not "Vice City").
+- Each scene also gets a 3–6 word on-screen headline (ALL CAPS) and a fallback template from:
+  title_card, map, cityscape, stat_bars, grid_abstract, orbit.
 Return JSON:
 {"angle": "...", "title": "...", "rumor_flags": ["..."], "claims": [{"claim": "...", "status": "confirmed|rumor", "source_hint": "..."}],
- "scenes": [{"narration": "...", "headline": "...", "template": "map", "params": {"accent": "#hex"}}],
- "caption": "<Instagram caption in US English, 2-3 lines + CTA>", "hashtags": ["#..."]}"""
+ "scenes": [{"narration": "...", "headline": "...", "image_prompt": "...", "template": "map", "params": {"accent": "#hex"}}],
+ "caption": "<Instagram/TikTok caption, 2-3 lines + CTA>", "hashtags": ["#..."]}"""
 
 
 def _fallback_script(trend: dict) -> dict:
@@ -28,22 +38,28 @@ def _fallback_script(trend: dict) -> dict:
     sub = trend.get("subtopic") or "general"
     if sub == "map":
         return {
-            "angle": "Why some open-world maps feel bigger than they are",
-            "title": f"Why {game}'s map feels bigger than it is",
+            "angle": "Three things about open-world maps most players never notice",
+            "title": f"3 things about {game}'s map you never noticed",
             "rumor_flags": ["Exact map size is not officially confirmed"],
             "claims": [{"claim": "Map size numbers circulating online", "status": "rumor", "source_hint": "No official figure released"}],
             "scenes": [
-                {"narration": "Everyone's arguing about how big this map is. That's the wrong question, and here's why.", "headline": "WRONG QUESTION", "template": "title_card", "params": {"accent": "#ff5f3c"}},
-                {"narration": "A map doesn't feel big because of square miles. It feels big because of density, travel time, and how often something stops you.", "headline": "DENSITY BEATS SIZE", "template": "map", "params": {"accent": "#2ee6a6"}},
-                {"narration": "Fewer straight roads, more elevation, more detours pulling you off the path. Your brain counts decisions, not miles, so the world stretches.", "headline": "CURVES STRETCH DISTANCE", "template": "cityscape", "params": {"accent": "#58a6ff"}},
-                {"narration": "And any exact size number you've seen online? That's a rumor until the studio confirms it. Follow for the next breakdown.", "headline": "RUMOR UNTIL CONFIRMED", "template": "stat_bars", "params": {"accent": "#ffd166"}},
+                {"narration": f"Three things about {game}'s map that almost nobody notices.", "headline": "3 THINGS YOU MISSED", "template": "title_card",
+                 "image_prompt": "dramatic aerial view of a sprawling fictional coastal city at dusk, painterly concept art, vertical", "params": {"accent": "#ff5f3c"}},
+                {"narration": "One. Open-world maps feel bigger when roads curve. Straight highways let your brain measure distance; curves hide it.", "headline": "CURVES HIDE DISTANCE", "template": "map",
+                 "image_prompt": "stylized top-down map of a fictional island with winding highways glowing at night, no text", "params": {"accent": "#2ee6a6"}},
+                {"narration": "Two. Designers plant something interesting every thirty to forty seconds of travel. Miss that rhythm and the world feels empty.", "headline": "THE 30-SECOND RULE", "template": "orbit",
+                 "image_prompt": "lonely desert road at golden hour with a mysterious glowing structure in the distance, concept art", "params": {"accent": "#58a6ff"}},
+                {"narration": "Three. Water and mountains are cheap. Dense city blocks are expensive. That's why big maps are mostly wilderness.", "headline": "WILDERNESS IS CHEAP", "template": "cityscape",
+                 "image_prompt": "dense neon city skyline bordered by dark mountains and ocean, moody painterly style, vertical", "params": {"accent": "#ffd166"}},
+                {"narration": "And any exact size number you've seen online? Still a rumor until the studio confirms it. Follow for more.", "headline": "RUMOR UNTIL CONFIRMED", "template": "stat_bars",
+                 "image_prompt": "abstract glowing question mark over a dark map grid, cinematic lighting", "params": {"accent": "#ff5f3c"}},
             ],
-            "caption": f"Why {game}'s map feels bigger than it actually is. Size numbers are rumors until confirmed.\nFollow for daily game breakdowns.",
-            "hashtags": ["#gaming", "#openworld", "#gamedesign"],
+            "caption": f"3 things about {game}'s map you probably never noticed. Size numbers are rumors until confirmed.\nFollow for daily gaming curiosities.",
+            "hashtags": ["#gaming", "#openworld", "#gamedesign", "#didyouknow"],
         }
     return {
-        "angle": f"What the {game} {sub} hype says about how we play",
-        "title": f"The real reason {game} is everywhere right now",
+        "angle": f"Three curiosities behind the {game} {sub} hype",
+        "title": f"3 things about {game} you never noticed",
         "rumor_flags": ["Details not confirmed by the developer are treated as rumors"],
         "claims": [],
         "scenes": [

@@ -1,9 +1,20 @@
 """Monta o MP4 vertical 9:16: 1 arquivo por cena (zoom/pan + legendas ASS), concat e áudio."""
 import math
 import os
+import random
 import subprocess
 from pathlib import Path
+from PIL import Image
 from . import visuals
+from .config import ROOT
+
+
+def find_broll(game: str | None) -> list[Path]:
+    """Clipes de gameplay gravados POR VOCÊ em assets/broll/<jogo>/ (mp4/mov). Nunca baixamos de terceiros."""
+    if not game:
+        return []
+    d = ROOT / "assets" / "broll" / game
+    return sorted(p for p in d.glob("*") if p.suffix.lower() in (".mp4", ".mov", ".mkv")) if d.exists() else []
 
 ENC = ["-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", "30"]
 
@@ -14,12 +25,15 @@ def _ass_time(t: float) -> str:
 
 
 def _write_ass(scene: dict, path: Path, font_name: str = "Inter"):
-    """Legendas em blocos de 3–4 palavras, sincronizadas com os tempos das palavras."""
+    """Legendas estilo short: 1–2 palavras por vez, grandes, centralizadas, com pop de cor."""
     words = scene["words"]
+    accent = scene.get("params", {}).get("accent", "#2ee6a6").lstrip("#")
+    abgr = f"&H00{accent[4:6]}{accent[2:4]}{accent[0:2]}"  # ASS usa BBGGRR
     chunks, cur = [], []
     for w in words:
         cur.append(w)
-        if len(cur) >= 3 and (len(cur) >= 4 or w["word"].rstrip().endswith((".", ",", "?", "!"))):
+        long_word = len(w["word"].strip()) >= 7
+        if len(cur) >= 2 or long_word or w["word"].rstrip().endswith((".", ",", "?", "!")):
             chunks.append(cur); cur = []
     if cur:
         chunks.append(cur)
@@ -28,12 +42,17 @@ def _write_ass(scene: dict, path: Path, font_name: str = "Inter"):
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, "
         "Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        f"Style: Cap,{font_name},78,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,6,2,2,80,80,560,1",
+        f"Style: Cap,{font_name},104,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,2,0,1,9,3,5,60,60,0,1",
+        f"Style: Pop,{font_name},112,{abgr},&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,2,0,1,9,3,5,60,60,0,1",
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
-    for ch in chunks:
-        text = " ".join(w["word"].strip() for w in ch).replace("{", "(").replace("}", ")")
-        lines.append(f"Dialogue: 0,{_ass_time(ch[0]['start'])},{_ass_time(ch[-1]['end'])},Cap,,0,0,0,,{text.upper()}")
+    for i, ch in enumerate(chunks):
+        text = " ".join(w["word"].strip() for w in ch).replace("{", "(").replace("}", ")").upper()
+        style = "Pop" if (i % 3 == 2 or text.rstrip(".,!?") in ("WRONG", "NOPE", "NO")) else "Cap"
+        # pequeno "pop" de escala na entrada (\fscx/\fscy animados) — centralizado na metade inferior
+        fx = "{\\an5\\pos(540,1180)\\fscx80\\fscy80\\t(0,80,\\fscx100\\fscy100)}"
+        end = max(ch[-1]["end"], ch[0]["start"] + 0.25)
+        lines.append(f"Dialogue: 0,{_ass_time(ch[0]['start'])},{_ass_time(end)},{style},,0,0,0,,{fx}{text}")
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
@@ -41,19 +60,51 @@ def _run(cmd: list[str]):
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
 
-def render_scene(cfg: dict, scene: dict, idx: int, workdir: Path) -> tuple[Path, bool]:
-    png, used_ai = visuals.render_scene_image(cfg, scene, idx, workdir)
+def _overlay_png(cfg: dict, scene: dict, idx: int, workdir: Path) -> Path:
+    """Só headline + selo, fundo transparente, para sobrepor ao B-roll."""
+    from PIL import ImageDraw
+    img = Image.new("RGBA", (visuals.W, visuals.H), (0, 0, 0, 0))
+    shade = Image.new("RGBA", (visuals.W, visuals.H), (0, 0, 0, 0))
+    ImageDraw.Draw(shade).rectangle([0, 0, visuals.W, 620], fill=(0, 0, 0, 110))
+    img = Image.alpha_composite(img, shade)
+    rgb = img.convert("RGB")
+    visuals._headline(rgb, cfg, scene["headline"], visuals._hex(scene.get("params", {}).get("accent", "#2ee6a6")))
+    visuals._label(rgb, cfg, cfg["video"]["broll_label"])
+    # recupera alpha: onde o rgb mudou vs. preto puro
+    import numpy as np
+    a = np.array(rgb); alpha = np.array(img)[:, :, 3]
+    alpha = np.maximum(alpha, (a.max(axis=2) > 0) * 255).astype(np.uint8)
+    out = Image.fromarray(np.dstack([a, alpha]), "RGBA")
+    p = workdir / f"overlay_{idx:02d}.png"; out.save(p)
+    return p
+
+
+def render_scene(cfg: dict, scene: dict, idx: int, workdir: Path, broll: list[Path] | None = None) -> tuple[Path, bool]:
     ass = workdir / f"scene_{idx:02d}.ass"
     _write_ass(scene, ass)
     fps = cfg["video"]["fps"]
     frames = max(int(round(scene["duration"] * fps)), fps)
     dur = frames / fps
-    # alterna zoom-in e pan lateral (movimento simples e barato)
-    if idx % 2 == 0:
-        z = f"zoompan=z='min(1+0.0012*on,1.18)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s=1080x1920:fps={fps}"
-    else:
-        z = f"zoompan=z='1.12':x='(iw-iw/zoom)*on/{frames}':y='ih/2-(ih/zoom/2)':d={frames}:s=1080x1920:fps={fps}"
     ass_path = str(ass).replace("\\", "/").replace(":", "\\:")
+    if broll:
+        clip = broll[idx % len(broll)]
+        scene["broll"] = True
+        ov = _overlay_png(cfg, scene, idx, workdir)
+        vf = (f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,fps={fps},"
+              f"eq=contrast=1.05:saturation=1.1[bg];[bg][1:v]overlay=0:0[o];[o]subtitles='{ass_path}',"
+              f"fade=t=in:d=0.25,fade=t=out:st={max(dur - 0.25, 0):.2f}:d=0.25,format=yuv420p[v]")
+        tmp, out = workdir / f"scene_{idx:02d}.tmp.mp4", workdir / f"scene_{idx:02d}.mp4"
+        _run(["ffmpeg", "-y", "-loglevel", "error", "-stream_loop", "-1", "-i", str(clip), "-i", str(ov),
+              "-filter_complex", vf, "-map", "[v]", "-t", f"{dur:.3f}", *ENC, "-an", str(tmp)])
+        os.replace(tmp, out)
+        return out, False
+    png, used_ai = visuals.render_scene_image(cfg, scene, idx, workdir)
+    # alterna zoom-in e pan lateral (movimento simples e barato)
+    punch = "1.22-0.12*min(on/6,1)"  # entra com zoom forte e relaxa em 6 frames (corte com impacto)
+    if idx % 2 == 0:
+        z = f"zoompan=z='{punch}+0.0010*on':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s=1080x1920:fps={fps}"
+    else:
+        z = f"zoompan=z='{punch}+0.02':x='(iw-iw/zoom)*on/{frames}':y='ih/2-(ih/zoom/2)':d={frames}:s=1080x1920:fps={fps}"
     vf = (f"scale=2160:3840:flags=lanczos,{z},subtitles='{ass_path}',"
           f"fade=t=in:d=0.25,fade=t=out:st={max(dur - 0.25, 0):.2f}:d=0.25,format=yuv420p")
     tmp, out = workdir / f"scene_{idx:02d}.tmp.mp4", workdir / f"scene_{idx:02d}.mp4"
@@ -62,10 +113,14 @@ def render_scene(cfg: dict, scene: dict, idx: int, workdir: Path) -> tuple[Path,
     return out, used_ai
 
 
-def assemble(cfg: dict, scenes: list[dict], workdir: Path, final_path: Path) -> dict:
+def assemble(cfg: dict, scenes: list[dict], workdir: Path, final_path: Path, game: str | None = None) -> dict:
     files, ai_images = [], 0
+    broll = find_broll(game) if cfg["video"].get("use_own_broll", True) else []
+    if broll:
+        random.Random(final_path.name).shuffle(broll)
+        print(f"[broll] usando {len(broll)} clipes próprios de assets/broll/{game}")
     for i, sc in enumerate(scenes):
-        f, used_ai = render_scene(cfg, sc, i, workdir)
+        f, used_ai = render_scene(cfg, sc, i, workdir, broll)
         files.append(f); ai_images += int(used_ai)
     lst = workdir / "concat.txt"
     lst.write_text("".join(f"file '{f.name}'\n" for f in files))
@@ -80,4 +135,4 @@ def assemble(cfg: dict, scenes: list[dict], workdir: Path, final_path: Path) -> 
           "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", "-movflags", "+faststart", str(tmp)])
     os.replace(tmp, final_path)
     total = sum(sc["duration"] for sc in scenes)
-    return {"path": str(final_path), "seconds": round(total, 2), "scenes": len(scenes), "ai_images": ai_images}
+    return {"path": str(final_path), "seconds": round(total, 2), "scenes": len(scenes), "ai_images": ai_images, "broll_clips": len(broll)}

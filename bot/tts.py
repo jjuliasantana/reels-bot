@@ -43,6 +43,54 @@ def _edge_tts(cfg: dict, text: str, out: Path) -> list[dict]:
     return asyncio.run(go())
 
 
+def _kokoro_tts(cfg: dict, text: str, out: Path) -> list[dict]:
+    """Kokoro (open-source, CPU, sem chave): voz natural + timestamps por palavra."""
+    import soundfile as sf
+    from kokoro import KPipeline
+    global _KOKORO
+    try:
+        _KOKORO
+    except NameError:
+        _KOKORO = KPipeline(lang_code="a")  # 'a' = American English
+    voice = cfg["ai"].get("kokoro_voice", "am_michael")
+    audio, words, offset = [], [], 0.0
+    for res in _KOKORO(text, voice=voice, speed=float(cfg["ai"].get("kokoro_speed", 1.05))):
+        if res.audio is None:
+            continue
+        a = res.audio.numpy() if hasattr(res.audio, "numpy") else np.asarray(res.audio)
+        for t in (res.tokens or []):
+            if getattr(t, "start_ts", None) is not None and t.text.strip():
+                words.append({"word": t.text, "start": offset + float(t.start_ts), "end": offset + float(t.end_ts)})
+        audio.append(a); offset += len(a) / 24000
+    sig = np.concatenate(audio) if audio else np.zeros(24000)
+    sf.write(str(out), sig, 24000)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(out), "-ar", "44100", "-ac", "1", str(out.with_suffix(".tmp.wav"))], check=True)
+    out.with_suffix(".tmp.wav").replace(out)
+    return words
+
+
+def _gemini_tts(cfg: dict, text: str, out: Path):
+    """Gemini TTS (cota gratuita): muito expressivo, com instrução de estilo. Sem timestamps de palavra."""
+    import base64
+    from . import llm
+    r = requests.get(f"{llm.GEMINI}/models", params={"key": SECRETS.gemini, "pageSize": 1000}, timeout=30)
+    r.raise_for_status()
+    names = [m["name"].removeprefix("models/") for m in r.json().get("models", []) if "tts" in m["name"]]
+    if not names:
+        raise RuntimeError("nenhum modelo TTS do Gemini disponível")
+    model = cfg["ai"].get("gemini_tts_model") if cfg["ai"].get("gemini_tts_model") in names else sorted(names)[0]
+    style = cfg["ai"].get("gemini_tts_style", "Energetic, confident gaming YouTuber, fast but clear, a little playful")
+    r = requests.post(f"{llm.GEMINI}/models/{model}:generateContent", params={"key": SECRETS.gemini},
+                      json={"contents": [{"parts": [{"text": f"{style}: {text}"}]}],
+                            "generationConfig": {"responseModalities": ["AUDIO"], "speechConfig": {"voiceConfig": {
+                                "prebuiltVoiceConfig": {"voiceName": cfg["ai"].get("gemini_tts_voice", "Puck")}}}}}, timeout=180)
+    r.raise_for_status()
+    data = next(p["inlineData"] for p in r.json()["candidates"][0]["content"]["parts"] if "inlineData" in p)
+    pcm = base64.b64decode(data["data"])  # PCM 16-bit 24 kHz mono
+    with wave.open(str(out), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000); w.writeframes(pcm)
+
+
 def _word_timestamps(path: Path) -> list[dict] | None:
     """Whisper com timestamps por palavra (opcional, melhora a sincronia das legendas)."""
     try:
@@ -82,27 +130,36 @@ def _even_words(text: str, dur: float) -> list[dict]:
 
 def narrate(cfg: dict, script: dict, workdir: Path) -> tuple[list[dict], bool]:
     """Gera 1 áudio por cena. Retorna (cenas com audio/duration/words, usou_tts_real?)."""
-    prov = cfg["ai"]["tts_provider"]
-    if prov == "edge":
-        try:
-            import edge_tts  # noqa: F401
-        except ImportError:
-            prov = "none"
-    if prov == "openai" and not SECRETS.openai:
-        prov = "none"
-    real = prov != "none"
+    order = [p.strip() for p in str(cfg["ai"]["tts_provider"]).split(",")] + ["edge", "none"]
     scenes = []
+    prov_used = None
     for i, sc in enumerate(script["scenes"]):
         path = workdir / f"narration_{i:02d}.wav"
         words = None
-        if prov == "edge":
-            words = _edge_tts(cfg, sc["narration"], path)
-        elif prov == "openai":
-            _openai_tts(cfg, sc["narration"], path)
-            words = _word_timestamps(path)
-        else:
-            _placeholder_audio(sc["narration"], path)
+        for prov in ([prov_used] if prov_used else order):  # cadeia de fallback; fixa o 1º que funcionar
+            try:
+                if prov == "kokoro":
+                    words = _kokoro_tts(cfg, sc["narration"], path)
+                elif prov == "gemini":
+                    if not SECRETS.gemini:
+                        raise RuntimeError("sem GEMINI_API_KEY")
+                    _gemini_tts(cfg, sc["narration"], path)
+                elif prov == "edge":
+                    words = _edge_tts(cfg, sc["narration"], path)
+                elif prov == "openai":
+                    if not SECRETS.openai:
+                        raise RuntimeError("sem OPENAI_API_KEY")
+                    _openai_tts(cfg, sc["narration"], path); words = _word_timestamps(path)
+                else:
+                    _placeholder_audio(sc["narration"], path)
+                prov_used = prov
+                break
+            except Exception as e:
+                print(f"[aviso] TTS {prov} falhou: {str(e)[:120]}")
+        real = prov_used not in (None, "none")
         dur = _duration(path)
         words = words or _even_words(sc["narration"], dur)
         scenes.append({**sc, "audio": str(path), "duration": dur, "words": words})
+    print(f"[tts] provedor usado: {prov_used}")
+    cfg["ai"]["_tts_used"] = prov_used
     return scenes, real

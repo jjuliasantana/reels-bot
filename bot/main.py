@@ -60,7 +60,7 @@ def write_report(cfg, post, trend, trends, script, video_info, cost, steps, simu
     L += [""]
     if video_info:
         L += ["## Vídeo", f"- Arquivo: `{video_info['path']}`", f"- Duração: {video_info['seconds']} s, {video_info['scenes']} cenas, 1080x1920 MP4",
-              f"- Imagens: {'IA (' + str(video_info['ai_images']) + ')' if video_info['ai_images'] else 'ilustrações procedurais originais'}", ""]
+              f"- Imagens: {'sua gameplay (B-roll próprio, ' + str(video_info.get('broll_clips', 0)) + ' clipes)' if video_info.get('broll_clips') else ('IA Gemini (' + str(video_info['ai_images']) + ' cenas)' if video_info['ai_images'] else 'ilustrações procedurais originais')}", ""]
     if cost:
         L += ["## Custo estimado por vídeo (USD)"] + [f"- {k}: {v:.4f}" for k, v in cost.items()] + [""]
     if script:
@@ -141,14 +141,14 @@ def cmd_run(cfg, con, dry_run: bool, sim: bool):
             script, by_llm = writer.write_script(cfg, trend)
             steps.append(("Roteiro original (en-US)", True, script.get("generated_by") if by_llm else "modelo de fallback — sem chave de LLM (GEMINI_API_KEY)"))
             scenes, real_tts = tts.narrate(cfg, script, workdir)
-            steps.append(("Narração + tempos de legenda", True, f"{cfg['ai']['tts_provider']} (voz real)" if real_tts else "ÁUDIO PLACEHOLDER (sem voz) — edge-tts não instalado / sem chave"))
+            steps.append(("Narração + tempos de legenda", True, f"{cfg['ai'].get('_tts_used')} (voz real)" if real_tts else "ÁUDIO PLACEHOLDER (sem voz) — edge-tts não instalado / sem chave"))
             total = sum(s["duration"] for s in scenes)
             vmin, vmax = cfg["video"]["min_seconds"], cfg["video"]["max_seconds"]
             if (total > vmax or total < vmin) and by_llm:
                 target = int(writer.word_count(script) * (vmax - 3) / total) if total > vmax else int(writer.word_count(script) * (vmin + 3) / total)
                 script, _ = writer.write_script(cfg, {**trend, "label": trend["label"] + f" (rewrite: exactly ~{target} words total)"})
                 scenes, real_tts = tts.narrate(cfg, script, workdir); total = sum(s["duration"] for s in scenes)
-            video_info = render.assemble(cfg, scenes, workdir, final)
+            video_info = render.assemble(cfg, scenes, workdir, final, trend.get("game"))
             steps.append(("Render MP4 9:16 (ilustrações + legendas)", True,
                           f"{video_info['seconds']} s" + (" ⚠️ fora da faixa 30–45 s" if not vmin <= video_info["seconds"] <= vmax else "")))
             cost = estimate_cost(cfg, script, len(scenes), cfg["video"]["image_generation"] == "openai" and bool(SECRETS.openai))

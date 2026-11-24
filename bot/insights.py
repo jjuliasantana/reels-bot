@@ -4,7 +4,7 @@ import requests
 from .config import SECRETS
 from . import db
 
-GRAPH = "https://graph.facebook.com/v21.0"
+GRAPH = "https://graph.instagram.com/v22.0"
 
 
 def fetch_and_store(con) -> int:
@@ -17,10 +17,10 @@ def fetch_and_store(con) -> int:
         mid = r["ig_media_id"]
         try:
             m = requests.get(f"{GRAPH}/{mid}/insights", params={
-                "metric": "plays,reach,likes,saved,shares,comments", "access_token": SECRETS.ig_token}, timeout=30).json()
+                "metric": "views,reach,likes,saved,shares,comments", "access_token": SECRETS.ig_token}, timeout=30).json()
             vals = {d["name"]: (d.get("values") or [{}])[0].get("value", 0) for d in m.get("data", [])}
             con.execute("INSERT OR REPLACE INTO insights VALUES(?,?,?,?,?,?,?,?)",
-                        (mid, db.now_iso(), vals.get("plays", 0), vals.get("reach", 0), vals.get("likes", 0),
+                        (mid, db.now_iso(), vals.get("views", vals.get("plays", 0)), vals.get("reach", 0), vals.get("likes", 0),
                          vals.get("saved", 0), vals.get("shares", 0), vals.get("comments", 0)))
             n += 1
         except Exception:
