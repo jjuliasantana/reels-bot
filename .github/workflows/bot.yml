@@ -3,7 +3,7 @@ name: reels-bot
 on:
   schedule:
     - cron: "0 */4 * * *"     # coleta de snapshots a cada 4 h (UTC)
-    - cron: "17 15 * * *"     # produção/publicação 1x por dia (12:17 em Brasília)
+    - cron: "31 17 * * *"     # produção 1x por dia: 14:31 em Brasília (vídeo pronto para postar às 15h)
   workflow_dispatch:
     inputs:
       mode:
@@ -24,6 +24,8 @@ jobs:
     env:
       YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
