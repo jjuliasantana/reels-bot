@@ -51,7 +51,7 @@ video:
 
 ai:
   llm_provider: "gemini"              # gemini (cota gratuita) | anthropic | openai | none
-  gemini_model: "gemini-2.5-flash"
+  gemini_model: "gemini-3.5-flash"      # se não existir, o bot escolhe sozinho o Flash estável mais novo (models.list)
   anthropic_model: "claude-sonnet-4-5"
   openai_model: "gpt-4o-mini"
   tts_provider: "edge"                # edge (gratuito, edge-tts) | openai | none (placeholder)
