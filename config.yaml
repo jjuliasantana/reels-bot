@@ -1,0 +1,84 @@
+# Configuração do bot (sem segredos — segredos vão em variáveis de ambiente / GitHub Secrets)
+
+channel:
+  name: "Dark Games Channel"          # usado só em relatórios
+  audience_language: "en-US"
+
+monitoring:
+  # Temas sempre monitorados. O bot pode escolher outros jogos a partir das buscas genéricas.
+  seed_topics:
+    - "GTA 6"
+    - "GTA"
+    - "Grand Theft Auto"
+  # Buscas genéricas para descobrir jogos novos em alta (qualquer idioma)
+  generic_queries:
+    - "gameplay"
+    - "game trailer"
+    - "new game update"
+    - "patch notes"
+    - "game leak"
+  lookback_hours: 48          # só vídeos publicados nas últimas N horas
+  max_results_per_query: 25   # custo de quota do YouTube: search.list = 100 unidades por chamada
+  min_views_to_track: 2000
+
+selection:
+  min_snapshots_for_confirmed: 2      # com 1 coleta o sinal é "preliminar"
+  allow_preliminary_post: false       # true = pode postar com sinal preliminar
+  min_independent_channels: 3
+  min_growth_views_per_hour: 500      # soma do crescimento do cluster por hora (confirmado)
+  min_cluster_views: 50000
+  weights:
+    growth: 1.0
+    channels: 0.8
+    languages: 0.4
+    english_fit: 0.6
+    insights_bonus: 0.5
+  cooldown_days_same_topic: 10        # não repetir pauta parecida nesse período
+
+video:
+  width: 1080
+  height: 1920
+  fps: 30
+  min_seconds: 30
+  max_seconds: 45
+  font_candidates:
+    - /usr/share/fonts/opentype/inter/Inter-Bold.otf
+    - /usr/share/fonts/truetype/inter/Inter-Bold.ttf
+    - /usr/share/fonts/truetype/google-fonts/ofl/montserrat/Montserrat[wght].ttf
+    - /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+  illustration_label: "ILLUSTRATION — not gameplay or official footage"
+  image_generation: "procedural"      # procedural (grátis) | openai (gpt-image, pago)
+
+ai:
+  llm_provider: "gemini"              # gemini (cota gratuita) | anthropic | openai | none
+  gemini_model: "gemini-2.5-flash"
+  anthropic_model: "claude-sonnet-4-5"
+  openai_model: "gpt-4o-mini"
+  tts_provider: "edge"                # edge (gratuito, edge-tts) | openai | none (placeholder)
+  edge_voice: "en-US-ChristopherNeural"   # outras: en-US-GuyNeural, en-US-AndrewNeural, en-US-AriaNeural
+  openai_tts_model: "tts-1"
+  openai_tts_voice: "onyx"
+  embeddings: "gemini"                # gemini (gratuito) | openai | none (fallback por dicionário de aliases)
+
+costs:
+  # Estimativas usadas para o controle de gastos (USD). Com Gemini free + edge-tts tudo é 0.
+  # Se trocar para OpenAI/Anthropic, use: llm 0.02, embeddings 0.002, tts 0.015/1k chars, whisper 0.006/min.
+  llm_script_usd: 0.0
+  embeddings_usd: 0.0
+  tts_per_1k_chars_usd: 0.0
+  whisper_per_minute_usd: 0.0
+  image_usd_each: 0.04
+  max_usd_per_video: 0.60
+  max_usd_per_day: 1.00
+  max_usd_per_month: 20.00
+
+publishing:
+  enabled: false                      # LIGUE SÓ DEPOIS DE AUTORIZAR. Também exige PUBLISH_ENABLED=true no ambiente.
+  provider: "instagram"               # instagram (Graph API) | buffer
+  max_posts_per_day: 1
+  hosting: "github_release"           # github_release | s3  (o Instagram precisa de uma URL pública do MP4)
+  hashtags: ["#gaming", "#gamer", "#videogames", "#gamenews"]
+
+alerts:
+  telegram: true                      # usa TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID se existirem
+  webhook: true                       # usa ALERT_WEBHOOK_URL (Discord/Slack) se existir
