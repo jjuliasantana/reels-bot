@@ -47,15 +47,23 @@ video:
     - /usr/share/fonts/truetype/google-fonts/ofl/montserrat/Montserrat[wght].ttf
     - /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
   illustration_label: "ILLUSTRATION — not gameplay or official footage"
-  image_generation: "procedural"      # procedural (grátis) | openai (gpt-image, pago)
+  broll_label: "GAMEPLAY CAPTURED BY US"
+  image_generation: "procedural"      # procedural (grátis, sempre funciona) | gemini (cota free, experimental) | openai (pago)
+  gemini_image_model: "gemini-2.5-flash-image"   # se não existir, o bot escolhe o modelo de imagem disponível
+  max_ai_images_per_video: 3          # poucas imagens IA por vídeo (gancho + 2 fatos); as outras cenas usam ilustração procedural
+  use_own_broll: true                 # usa clipes SEUS em assets/broll/<jogo>/*.mp4 quando existirem (ex.: assets/broll/gta/)
 
 ai:
   llm_provider: "gemini"              # gemini (cota gratuita) | anthropic | openai | none
   gemini_model: "gemini-3.5-flash"      # se não existir, o bot escolhe sozinho o Flash estável mais novo (models.list)
   anthropic_model: "claude-sonnet-4-5"
   openai_model: "gpt-4o-mini"
-  tts_provider: "edge"                # edge (gratuito, edge-tts) | openai | none (placeholder)
-  edge_voice: "en-US-ChristopherNeural"   # outras: en-US-GuyNeural, en-US-AndrewNeural, en-US-AriaNeural
+  tts_provider: "kokoro,gemini,edge"  # ordem de tentativa (todos gratuitos). kokoro = natural + legendas sincronizadas; gemini = mais expressivo
+  kokoro_voice: "am_michael"          # outras: am_adam, am_echo, am_eric, af_heart (feminina), af_bella
+  kokoro_speed: 1.05
+  gemini_tts_voice: "Puck"            # outras: Fenrir, Charon, Kore, Aoede
+  gemini_tts_style: "Energetic, confident gaming YouTuber, fast but clear, a little playful"
+  edge_voice: "en-US-AndrewMultilingualNeural"   # voz jovem/energética; outras: en-US-ChristopherNeural, en-US-GuyNeural
   openai_tts_model: "tts-1"
   openai_tts_voice: "onyx"
   embeddings: "gemini"                # gemini (gratuito) | openai | none (fallback por dicionário de aliases)
