@@ -1,0 +1,3 @@
+Coloque aqui clipes de gameplay GRAVADOS POR VOCÊ (mp4, 1080p vertical ou horizontal, 10–30 s cada).
+Subpasta = slug do jogo: gta, elden-ring, minecraft, fortnite, roblox, call-of-duty...
+O bot corta/recorta para 9:16 e sobrepõe headline + legendas. Nunca use vídeos de outros canais.

@@ -1,0 +1,5 @@
+# Links de download de material OFICIAL do publisher (trailer, screenshots). Um por linha: <jogo> <url>
+# Só domínios em video.official_domains são aceitos. O bot baixa para assets/broll/<jogo>/official_*.
+# Exemplo (troque pelos links reais copiados do site da Rockstar — botão direito > copiar endereço):
+# gta https://media.rockstargames.com/.../screenshot.jpg
+# gta https://videos.rockstargames.com/.../trailer.mp4
