@@ -40,13 +40,19 @@ Alternativa: `Dockerfile` incluso — roda em qualquer VPS/Cloud Run/Fly.io com 
 | `GEMINI_API_KEY` | roteiro, rotulagem dos clusters e embeddings multilíngues — **gratuito** (cota free do Google AI Studio) | aistudio.google.com → *Get API key* (sem cartão). Obs.: na cota gratuita o Google pode usar os prompts para melhorar seus modelos. |
 | — (edge-tts) | narração com voz neural e tempos por palavra para as legendas — **gratuito**, sem chave | já incluso em `requirements.txt` (usa o serviço de leitura em voz alta do Microsoft Edge; não é uma API oficial, pode mudar sem aviso). |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | opcionais, pagos: troque `llm_provider` / `tts_provider` / `embeddings` no `config.yaml` se quiser mais qualidade | console.anthropic.com / platform.openai.com |
-| `IG_USER_ID` + `IG_ACCESS_TOKEN` | publicar Reels | Conta Instagram **Profissional** ligada a uma Página do Facebook → developers.facebook.com → app → *Instagram Graph API* → token de longa duração com `instagram_basic, instagram_content_publish, instagram_manage_insights, pages_read_engagement`. Renove a cada 60 dias. |
+| `IG_ACCESS_TOKEN` (+ `IG_USER_ID` opcional) | publicar Reels e ler métricas | developers.facebook.com → criar app → caso de uso *Instagram* → **API setup with Instagram login** (não precisa de Página do Facebook) → adicionar as permissões `instagram_business_basic`, `instagram_business_content_publish`, `instagram_business_manage_insights` → *Generate access tokens* → adicionar sua conta profissional → gerar token (60 dias; renove). O bot descobre o `IG_USER_ID` sozinho via `/me`. Teste com `python -m bot.main check`. |
 | `BUFFER_ACCESS_TOKEN` + `BUFFER_PROFILE_ID` | alternativa ao Graph API (`publishing.provider: buffer`) | painel do Buffer (acesso à API depende do seu plano). |
 | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` ou `ALERT_WEBHOOK_URL` | avisos de erro/sucesso | @BotFather no Telegram / webhook do Discord ou Slack |
 | `GITHUB_TOKEN` | hospedar o MP4 (automático no Actions) | — |
 
 Sem alguma credencial o bot **não para**: usa dados simulados (identificados como `SIM…`), roteiro-modelo e
 áudio placeholder, e lista no relatório o que foi real e o que não foi.
+
+## YouTube Shorts e TikTok
+As APIs de upload do YouTube e do TikTok deixam o vídeo **privado** até o projeto passar por auditoria da
+plataforma. Até lá, use `publishing.provider: telegram`: o bot gera o Reel e envia o MP4 no Telegram com título e
+legenda prontos para cada plataforma; você posta pelo celular. Pedido de auditoria do YouTube: formulário
+"YouTube API Services – Audit and Quota Extension" no Google Cloud Console (gratuito).
 
 ## Regras de segurança já embutidas
 - `publishing.enabled: false` por padrão + `PUBLISH_ENABLED` precisa ser `true` no ambiente.

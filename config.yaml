@@ -74,7 +74,7 @@ costs:
 
 publishing:
   enabled: false                      # LIGUE SÓ DEPOIS DE AUTORIZAR. Também exige PUBLISH_ENABLED=true no ambiente.
-  provider: "instagram"               # instagram (Graph API) | buffer
+  provider: "telegram"                # telegram (manda o MP4 + textos para você postar no YouTube Shorts/TikTok) | instagram (Graph API) | buffer
   max_posts_per_day: 1
   hosting: "github_release"           # github_release | s3  (o Instagram precisa de uma URL pública do MP4)
   hashtags: ["#gaming", "#gamer", "#videogames", "#gamenews"]
