@@ -6,32 +6,57 @@ GAME_DISPLAY = {"gta": "GTA 6", "elden-ring": "Elden Ring", "call-of-duty": "Cal
                 "counter-strike": "Counter-Strike", "red-dead": "Red Dead", "baldurs-gate": "Baldur's Gate", "the-witcher": "The Witcher"}
 VISUAL_TEMPLATES = ["title_card", "map", "cityscape", "stat_bars", "grid_abstract", "orbit"]
 
-SYSTEM = """You are a sharp, funny American gaming creator making a 30–45 second vertical short in the "did you know" /
-gaming-curiosities style (think: "3 things about X you never noticed").
-Format (exactly this structure):
-- Scene 1 HOOK (≤ 12 words): a bold, slightly cheeky claim or question that makes people stop scrolling
-  ("This map is lying to you.", "Nobody talks about this glitch." ). No "hey guys", no "did you know".
-- Scenes 2–4: THREE surprising, specific, true facts/curiosities tied to the trend. Each one concrete (a number, a detail,
-  a hidden mechanic, a dev decision, an easter egg, a record). Short punchy sentences.
-- Before the last fact, tease it ("and the last one is the weird one"). Scene 5: a twist or a punchline + CTA ("Follow for more").
-- Tone: confident, funny, a little sarcastic, like a friend who knows too much about games. Use "you". Vary rhythm:
-  one-word sentences are welcome ("Wrong.", "Nope.").
-Rules:
-- Use third-party videos ONLY as a trend signal. Never describe, quote or reuse their footage, thumbnails or audio.
-- Only state facts you are confident are widely confirmed (publisher/developer/official sources). Anything unconfirmed
-  must be flagged in the narration ("rumor has it", "reportedly", "not confirmed yet"). Never invent numbers.
-- Natural spoken US English, creator energy, no emojis in narration. Total narration 80–110 words (≈35–45 s).
-- For each scene write an image_prompt: a vivid, original illustration idea in a stylized painterly/concept-art
-  look, vertical composition, moody lighting, NO text, NO logos, NO real characters or trademarked designs, and
-  described generically (e.g. "neon-lit coastal city at night from above", not "Vice City").
-- Each scene also gets a stock_query: 2–4 English words to find real stock footage for the mood (e.g. "night city drone",
-  "desert highway", "neon rain street", "ocean coast aerial"). Generic, no game names.
-- Each scene also gets a 3–6 word on-screen headline (ALL CAPS) and a fallback template from:
-  title_card, map, cityscape, stat_bars, grid_abstract, orbit.
+SYSTEM = """You write 35–45 second vertical shorts for {channel} ({handle}), a gaming-curiosities channel. Think of the best
+"things you didn't know about <game>" creators: specific, surprising, a little cocky, zero filler.
+
+THE ONE RULE: every sentence must be ABOUT THIS GAME. Concrete details only: a mechanic, a number, a dev decision, an
+easter egg, a cut feature, a record, a weird bug, a design trick, a cost, a date, a comparison with a previous entry.
+If a sentence could be pasted into a video about a different game, delete it.
+
+Structure:
+1. HOOK (≤ 12 words): a bold claim or question about THIS game ("GTA 6's cops are smarter than you think." /
+   "Elden Ring hides a boss 90% of players never find.").
+2–4. THREE facts/curiosities, each 2–3 short sentences, each with at least one specific detail. Tease the last one
+   ("the last one is the weird one").
+5. Punchline or twist + CTA: "Follow {channel} for more".
+
+Hard bans: "dive into", "game-changer", "immersive", "next level", "in this video", "did you know", "let's talk about",
+"gaming community", any sentence about trends, popularity, views, channels, languages or hype in general.
+Never invent numbers or features. Only facts you are confident are confirmed by the developer/publisher or widely
+documented; otherwise say "reportedly" / "rumor has it" / "not confirmed yet". Use third-party video titles only as a
+hint of WHAT people are talking about, never as a source of facts.
+
+Spoken US English, creator energy, short sentences, one-word sentences welcome ("Wrong.", "Nope."). 80–110 words total.
+For each scene add: headline (3–6 words, ALL CAPS, specific), stock_query (2–4 generic English words for stock footage
+mood, no game names), image_prompt (original stylized illustration idea, no logos/characters/text), template from
+title_card, map, cityscape, stat_bars, grid_abstract, orbit, and params.accent (hex color).
 Return JSON:
 {"angle": "...", "title": "...", "rumor_flags": ["..."], "claims": [{"claim": "...", "status": "confirmed|rumor", "source_hint": "..."}],
  "scenes": [{"narration": "...", "headline": "...", "image_prompt": "...", "stock_query": "...", "template": "map", "params": {"accent": "#hex"}}],
- "caption": "<Instagram/TikTok caption, 2-3 lines + CTA>", "hashtags": ["#..."]}"""
+ "caption": "<2-3 line caption + CTA, last line mentions {handle}>", "hashtags": ["#..."]}"""
+
+BANNED = ("dive into", "game-changer", "game changer", "immersive", "next level", "in this video", "did you know",
+          "let's talk about", "gaming community", "across languages", "independent channels", "momentum")
+
+
+def _quality_issues(script: dict, trend: dict) -> list[str]:
+    """Checagem automática: fala do jogo? tem detalhe concreto? sem frases genéricas?"""
+    text = " ".join(sc["narration"] for sc in script.get("scenes", [])).lower()
+    issues = []
+    name = (trend.get("game_name") or trend.get("game") or "").lower()
+    keys = [k for k in {name, name.replace("grand theft auto", "gta"), (trend.get("game") or "").replace("-", " ")} if k]
+    if keys and not any(k.split()[0] in text for k in keys):
+        issues.append("não menciona o jogo")
+    import re
+    if len(re.findall(r"\d", text)) < 2:
+        issues.append("quase nenhum número/detalhe concreto")
+    hits = [b for b in BANNED if b in text]
+    if hits:
+        issues.append("frases genéricas: " + ", ".join(hits))
+    n = len(text.split())
+    if not 60 <= n <= 130:
+        issues.append(f"{n} palavras (fora de 80–110)")
+    return issues
 
 
 def _fallback_script(trend: dict) -> dict:
@@ -89,8 +114,20 @@ def write_script(cfg: dict, trend: dict) -> tuple[dict, bool]:
     }, ensure_ascii=False)
     system = SYSTEM.replace("{channel}", cfg["channel"]["name"]).replace("{handle}", cfg["channel"].get("handle", ""))
     try:
-        s = llm.chat_json(cfg, system, user, max_tokens=1800)
-        assert s.get("scenes") and s.get("caption") and s.get("angle")
+        s, last_err = None, None
+        for attempt in range(3):  # até 3 tentativas; a partir da 2ª manda os problemas encontrados
+            extra = "" if not last_err else f"\n\nYour previous draft was rejected because: {last_err}. Fix ALL of it."
+            cand = llm.chat_json(cfg, system, user + extra, max_tokens=2500)
+            if not (cand.get("scenes") and cand.get("caption") and cand.get("angle")):
+                last_err = "JSON incompleto"; continue
+            issues = _quality_issues(cand, trend)
+            if not issues:
+                s = cand; break
+            last_err = "; ".join(issues); s = cand
+            print(f"[roteiro] tentativa {attempt + 1} com problemas: {last_err}")
+        if s is None:
+            raise RuntimeError(last_err or "sem roteiro")
+        s["quality_issues"] = _quality_issues(s, trend)
     except Exception as e:
         print(f"[aviso] roteiro por LLM falhou ({e}); usando roteiro-modelo")
         s = _fallback_script(trend); s["generated_by"] = f"fallback-template (LLM falhou: {str(e)[:80]})"

@@ -139,7 +139,9 @@ def cmd_run(cfg, con, dry_run: bool, sim: bool):
             steps.append(("Roteiro + vídeo", True, "reaproveitados de execução anterior (anti-duplicata)"))
         else:
             script, by_llm = writer.write_script(cfg, trend)
-            steps.append(("Roteiro original (en-US)", True, script.get("generated_by") if by_llm else "modelo de fallback — sem chave de LLM (GEMINI_API_KEY)"))
+            steps.append(("Roteiro original (en-US)", by_llm, script.get("generated_by") + (f" ⚠️ {script['quality_issues']}" if script.get("quality_issues") else "")))
+            if not by_llm:
+                alerts.notify(cfg, f"⚠️ Roteiro do Gemini falhou ({script.get('generated_by')}). O vídeo de hoje usa o roteiro-modelo genérico — melhor NÃO postar.")
             scenes, real_tts = tts.narrate(cfg, script, workdir)
             steps.append(("Narração + tempos de legenda", True, f"{cfg['ai'].get('_tts_used')} (voz real)" if real_tts else "ÁUDIO PLACEHOLDER (sem voz) — edge-tts não instalado / sem chave"))
             total = sum(s["duration"] for s in scenes)

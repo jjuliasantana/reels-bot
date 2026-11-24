@@ -57,7 +57,8 @@ def available(cfg: dict) -> str | None:
 def chat(cfg: dict, system: str, user: str, max_tokens: int = 1500, json_mode: bool = False) -> str:
     prov = available(cfg)
     if prov == "gemini":
-        gen = {"maxOutputTokens": max_tokens * 2, "temperature": 0.8}
+        # Gemini 2.5/3.x "pensa" antes de responder e o pensamento conta no limite de tokens: limite alto + pouco pensamento.
+        gen = {"maxOutputTokens": 8192, "temperature": 0.9, "thinkingConfig": {"thinkingBudget": 512}}
         if json_mode:
             gen["responseMimeType"] = "application/json"
         r = requests.post(f"{GEMINI}/models/{gemini_model(cfg)}:generateContent",
@@ -65,8 +66,17 @@ def chat(cfg: dict, system: str, user: str, max_tokens: int = 1500, json_mode: b
                           json={"system_instruction": {"parts": [{"text": system}]},
                                 "contents": [{"role": "user", "parts": [{"text": user}]}],
                                 "generationConfig": gen}, timeout=120)
+        if r.status_code == 400 and "thinking" in r.text.lower():  # modelo sem thinkingConfig
+            gen.pop("thinkingConfig", None)
+            r = requests.post(f"{GEMINI}/models/{gemini_model(cfg)}:generateContent", params={"key": SECRETS.gemini},
+                              json={"system_instruction": {"parts": [{"text": system}]},
+                                    "contents": [{"role": "user", "parts": [{"text": user}]}], "generationConfig": gen}, timeout=120)
         r.raise_for_status()
-        return "".join(p.get("text", "") for p in r.json()["candidates"][0]["content"]["parts"])
+        cand = r.json()["candidates"][0]
+        txt = "".join(p.get("text", "") for p in cand["content"].get("parts", []) if not p.get("thought"))
+        if not txt.strip():
+            raise RuntimeError(f"resposta vazia do Gemini (finishReason={cand.get('finishReason')})")
+        return txt
     if prov == "anthropic":
         r = requests.post("https://api.anthropic.com/v1/messages", headers={
             "x-api-key": SECRETS.anthropic, "anthropic-version": "2023-06-01", "content-type": "application/json"},
