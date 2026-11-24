@@ -1,7 +1,8 @@
 # Configuração do bot (sem segredos — segredos vão em variáveis de ambiente / GitHub Secrets)
 
 channel:
-  name: "Dark Games Channel"          # usado só em relatórios
+  name: "Beyond the HUD"              # usado no CTA/legenda e nos relatórios
+  handle: "@beyondthehudtv"
   audience_language: "en-US"
 
 monitoring:
@@ -51,14 +52,21 @@ video:
   image_generation: "procedural"      # procedural (grátis, sempre funciona) | gemini (cota free, experimental) | openai (pago)
   gemini_image_model: "gemini-2.5-flash-image"   # se não existir, o bot escolhe o modelo de imagem disponível
   max_ai_images_per_video: 3          # poucas imagens IA por vídeo (gancho + 2 fatos); as outras cenas usam ilustração procedural
-  use_own_broll: true                 # usa clipes SEUS em assets/broll/<jogo>/*.mp4 quando existirem (ex.: assets/broll/gta/)
+  use_own_broll: true                 # usa arquivos em assets/broll/<jogo>/ (sua gameplay ou material oficial; vídeo ou imagem)
+  use_steam_official: true            # baixa trailer + screenshots oficiais da página do jogo na Steam (qualquer jogo, sem chave)
+  use_pexels: true                    # sem material do jogo, usa vídeo real de banco gratuito (precisa de PEXELS_API_KEY)
+  official_label: "Official footage © Rockstar Games"
+  stock_label: "Stock footage (Pexels)"
+  official_domains: [rockstargames.com, take2games.com, steamstatic.com, steampowered.com, nintendo.com, playstation.com, xbox.com, ea.com, ubisoft.com, bethesda.net]
 
 ai:
   llm_provider: "gemini"              # gemini (cota gratuita) | anthropic | openai | none
   gemini_model: "gemini-3.5-flash"      # se não existir, o bot escolhe sozinho o Flash estável mais novo (models.list)
   anthropic_model: "claude-sonnet-4-5"
   openai_model: "gpt-4o-mini"
-  tts_provider: "kokoro,gemini,edge"  # ordem de tentativa (todos gratuitos). kokoro = natural + legendas sincronizadas; gemini = mais expressivo
+  tts_provider: "elevenlabs,gemini,kokoro,edge"  # ordem de tentativa. elevenlabs (melhor; grátis p/ teste, US$5 p/ monetizar) → gemini → kokoro → edge
+  elevenlabs_voice_id: "pNInz6obpgDQGcFmaJgB"   # Adam. Outras: copie o Voice ID na Voice Library do ElevenLabs
+  elevenlabs_model: "eleven_multilingual_v2"
   kokoro_voice: "am_michael"          # outras: am_adam, am_echo, am_eric, af_heart (feminina), af_bella
   kokoro_speed: 1.05
   gemini_tts_voice: "Puck"            # outras: Fenrir, Charon, Kore, Aoede
