@@ -2,12 +2,11 @@ name: reels-bot
 
 on:
   schedule:
-    - cron: "0 */4 * * *"     # coleta de snapshots a cada 4 h (UTC)
-    - cron: "31 17 * * *"     # produção 1x por dia: 14:31 em Brasília (vídeo pronto para postar às 15h)
+    - cron: "23 */2 * * *"    # a cada 2 h: coleta sempre; produz 1x/dia depois das 14h (Brasília). Tolera atrasos do GitHub.
   workflow_dispatch:
     inputs:
       mode:
-        description: "collect | run | dry-run | sim"
+        description: "auto | collect | run | dry-run | sim"
         default: "dry-run"
 
 permissions:
@@ -53,11 +52,11 @@ jobs:
         id: mode
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "mode=${{ inputs.mode }}" >> $GITHUB_OUTPUT;
-          elif [ "${{ github.event.schedule }}" = "0 */4 * * *" ]; then echo "mode=collect" >> $GITHUB_OUTPUT;
-          else echo "mode=run" >> $GITHUB_OUTPUT; fi
+          else echo "mode=auto" >> $GITHUB_OUTPUT; fi
       - name: Executar
         run: |
           case "${{ steps.mode.outputs.mode }}" in
+            auto)    python -m bot.main auto ;;
             collect) python -m bot.main collect ;;
             run)     python -m bot.main run ;;
             sim)     python -m bot.main run --dry-run --sim ;;
