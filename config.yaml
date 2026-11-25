@@ -5,6 +5,10 @@ channel:
   handle: "@beyondthehudtv"
   audience_language: "en-US"
 
+schedule:
+  timezone: "America/Sao_Paulo"
+  produce_after_hour: 14              # a partir dessa hora local, a primeira execução do dia produz o vídeo
+
 monitoring:
   # Temas sempre monitorados. O bot pode escolher outros jogos a partir das buscas genéricas.
   seed_topics:
