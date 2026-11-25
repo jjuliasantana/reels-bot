@@ -97,10 +97,12 @@ def cmd_run(cfg, con, dry_run: bool, sim: bool):
     trends = cluster.score_clusters(cfg, videos, prior)
     steps.append(("Agrupamento multilíngue e pontuação", True,
                   f"embeddings {cfg['ai']['embeddings']}" if (cfg["ai"]["embeddings"] == "gemini" and SECRETS.gemini) or (cfg["ai"]["embeddings"] == "openai" and SECRETS.openai) else "dicionário de aliases (sem embeddings)"))
-    if dry_run and not cfg["selection"]["allow_preliminary_post"]:
-        # Em teste (sem publicar) aceitamos sinal preliminar para sempre gerar um vídeo de amostra.
+    manual_mode = not (cfg["publishing"]["enabled"] and SECRETS.publish_enabled_env) or cfg["publishing"]["provider"] == "telegram"
+    if (dry_run or manual_mode) and not cfg["selection"]["allow_preliminary_post"]:
+        # Sem publicação automática (dry-run ou entrega manual pelo Telegram) sempre entregamos um vídeo por dia,
+        # mesmo com sinal preliminar; a exigência de 2 coletas vale só para publicar sozinho.
         cfg["selection"]["allow_preliminary_post"] = True
-        steps.append(("Modo dry-run", True, "sinal preliminar aceito só para gerar amostra (na publicação real exige 2 coletas)"))
+        steps.append(("Modo manual/teste", True, "sinal preliminar aceito para garantir um vídeo por dia"))
     trend, reason = cluster.pick(cfg, trends, db.recent_post_topics(con, cfg["selection"]["cooldown_days_same_topic"]))
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     post = {"post_key": f"{(trend or {}).get('slug', 'none')}-{today}", "topic_slug": (trend or {}).get("slug"),
@@ -109,6 +111,8 @@ def cmd_run(cfg, con, dry_run: bool, sim: bool):
         steps.append(("Seleção de pauta", False, reason))
         p = write_report(cfg, post, None, trends, None, None, None, steps, simulated, reason)
         print(f"PULADO: {reason}\nrelatório: {p}")
+        top = "\n".join(f"- {t['label']}: {', '.join(t.get('rejection_reasons', [])) or 'ok'}" for t in trends[:5])
+        alerts.notify(cfg, f"⏭️ Hoje não saiu vídeo: {reason}.\nTendências avaliadas:\n{top}")
         return
     steps.append(("Seleção de pauta", True, trend["label"]))
 
@@ -219,6 +223,28 @@ def cmd_check(cfg):
     print("Publicação:", "LIGADA" if (cfg["publishing"]["enabled"] and SECRETS.publish_enabled_env) else "desligada")
 
 
+def delivered_today(con) -> bool:
+    return con.execute(
+        "SELECT COUNT(*) FROM posts WHERE date(created_at)=date('now') AND status IN ('rendered','hosted','creating','published')"
+    ).fetchone()[0] > 0
+
+
+def cmd_auto(cfg, con):
+    """Modo agendado robusto: sempre coleta; produz 1x/dia a partir da hora configurada (tolera atrasos do GitHub)."""
+    from zoneinfo import ZoneInfo
+    cmd_collect(cfg, con)
+    tz = ZoneInfo(cfg.get("schedule", {}).get("timezone", "America/Sao_Paulo"))
+    hour_now = datetime.now(tz).hour
+    start = int(cfg.get("schedule", {}).get("produce_after_hour", 14))
+    if hour_now < start:
+        print(f"auto: ainda não são {start}h ({hour_now}h); só coleta")
+        return
+    if delivered_today(con):
+        print("auto: vídeo de hoje já entregue")
+        return
+    cmd_run(cfg, con, dry_run=False, sim=False)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -226,6 +252,7 @@ def main(argv=None):
     r = sub.add_parser("run"); r.add_argument("--dry-run", action="store_true"); r.add_argument("--sim", action="store_true")
     sub.add_parser("insights")
     sub.add_parser("check")   # testa as credenciais configuradas, sem publicar nada
+    sub.add_parser("auto")    # coleta + produção diária quando for hora (para o agendamento)
     a = ap.parse_args(argv)
     cfg, con = load_config(), db.connect()
     if a.cmd == "collect":
@@ -236,6 +263,8 @@ def main(argv=None):
         print(f"insights atualizados: {insights.fetch_and_store(con)}")
     elif a.cmd == "check":
         cmd_check(cfg)
+    elif a.cmd == "auto":
+        cmd_auto(cfg, con)
 
 
 if __name__ == "__main__":
